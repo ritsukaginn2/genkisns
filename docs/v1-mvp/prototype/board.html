@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>GenkiSNS V1 · 设计看板</title>
+    <style>
+      :root {
+        --phone-w: 393px;
+        --phone-h: 852px;
+        --scale: 0.62;
+        --slot-w: calc(var(--phone-w) * var(--scale));
+        --slot-h: calc(var(--phone-h) * var(--scale));
+        --sb-h: 54px;
+        --hb-h: 34px;
+        --bg: #1a1714;
+        --surface: #232018;
+        --border: #38342e;
+        --ink: #f0ece4;
+        --muted: #8a8278;
+        --accent: #ff4f8b;
+        --phone-shell: #0d0c0b;
+        --app-bg: #fff5f8;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        min-height: 100vh;
+        padding: 40px 48px 80px;
+      }
+
+      .canvas-header { margin-bottom: 48px; }
+      .canvas-header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+      .canvas-header p { margin-top: 6px; font-size: 13px; color: var(--muted); }
+      .canvas-header a { color: var(--accent); text-decoration: none; font-weight: 600; }
+
+      .section { margin-bottom: 56px; }
+      .section-header {
+        display: flex; align-items: baseline; gap: 12px;
+        margin-bottom: 24px; padding-bottom: 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .section-header h2 {
+        font-size: 13px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+      }
+      .section-header .count { font-size: 11px; color: var(--border); }
+
+      .phone-row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+
+      .frame { display: flex; flex-direction: column; align-items: center; gap: 12px; flex-shrink: 0; }
+      .frame-label { font-size: 12px; font-weight: 600; color: var(--muted); text-align: center; max-width: var(--slot-w); }
+      .frame-label span {
+        display: inline-block;
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 6px; padding: 3px 10px; font-size: 11px;
+      }
+
+      .phone-slot { width: var(--slot-w); height: var(--slot-h); flex-shrink: 0; }
+      .phone {
+        width: var(--phone-w); height: var(--phone-h);
+        padding: 12px; border-radius: 44px;
+        background: var(--phone-shell);
+        box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 28px 72px rgba(0,0,0,0.55);
+        transform: scale(var(--scale));
+        transform-origin: top left;
+      }
+
+      .screen {
+        width: 100%; height: 100%;
+        border-radius: 34px; overflow: hidden;
+        display: flex; flex-direction: column;
+        background: var(--app-bg);
+      }
+
+      .status-bar {
+        flex-shrink: 0; height: var(--sb-h);
+        background: var(--app-bg);
+        display: flex; align-items: flex-end;
+        padding: 0 28px 10px; position: relative;
+      }
+      .sb-time { font-size: 15px; font-weight: 700; color: #231722; letter-spacing: -0.2px; font-family: -apple-system, sans-serif; }
+      .sb-island { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); width: 126px; height: 37px; background: #000; border-radius: 20px; }
+      .sb-icons { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+
+      .iframe-area { flex: 1; overflow: hidden; }
+      .iframe-area iframe { display: block; width: 100%; height: 100%; border: 0; }
+
+      .home-bar-area { flex-shrink: 0; height: var(--hb-h); background: var(--app-bg); display: flex; align-items: center; justify-content: center; }
+      .home-bar { width: 134px; height: 5px; background: rgba(35,23,34,0.22); border-radius: 3px; }
+
+      .arrow { display: flex; align-items: center; padding-top: calc(var(--slot-h) / 2 - 8px); color: var(--border); font-size: 18px; flex-shrink: 0; user-select: none; }
+    </style>
+  </head>
+  <body>
+
+    <header class="canvas-header">
+      <h1>GenkiSNS V1 · 设计全览</h1>
+      <p>
+        Phase 3b ·
+        <a href="index.html">← 单帧预览</a>
+        &nbsp;·&nbsp;
+        <a href="designs.html">UI 方向对比</a>
+      </p>
+    </header>
+
+    <!-- Onboarding -->
+    <section class="section">
+      <div class="section-header">
+        <h2>Onboarding</h2>
+        <span class="count">3 步</span>
+      </div>
+      <div class="phone-row">
+        <div class="frame">
+          <div class="frame-label"><span>① 说明</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe src="../../../build/web/index.html?view=onboarding-1" title="说明"></iframe>
+          </div></div></div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="frame">
+          <div class="frame-label"><span>② 创建主页</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe src="../../../build/web/index.html?view=onboarding-2" title="创建主页"></iframe>
+          </div></div></div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="frame">
+          <div class="frame-label"><span>③ 选 AI 好友</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe src="../../../build/web/index.html?view=onboarding-3" title="选 AI 好友"></iframe>
+          </div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 首页 -->
+    <section class="section">
+      <div class="section-header">
+        <h2>首页</h2>
+        <span class="count">2 个状态</span>
+      </div>
+      <div class="phone-row">
+        <div class="frame">
+          <div class="frame-label"><span>有内容</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe src="../../../build/web/index.html?view=home" title="首页 有内容"></iframe>
+          </div></div></div>
+        </div>
+        <div class="frame">
+          <div class="frame-label"><span>空状态</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe src="../../../build/web/index.html?view=home-empty" title="首页 空状态"></iframe>
+          </div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 发布笔记 -->
+    <section class="section">
+      <div class="section-header">
+        <h2>发布笔记</h2>
+        <span class="count">1 个状态</span>
+      </div>
+      <div class="phone-row">
+        <div class="frame">
+          <div class="frame-label"><span>发布页</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe src="../../../build/web/index.html?view=create" title="发布笔记"></iframe>
+          </div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 笔记详情 -->
+    <section class="section">
+      <div class="section-header">
+        <h2>笔记详情</h2>
+        <span class="count">1 个状态</span>
+      </div>
+      <div class="phone-row">
+        <div class="frame">
+          <div class="frame-label"><span>详情 + 评论区</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe src="../../../build/web/index.html?view=detail" title="笔记详情"></iframe>
+          </div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 我的 -->
+    <section class="section">
+      <div class="section-header">
+        <h2>我的</h2>
+        <span class="count">3 个页面</span>
+      </div>
+      <div class="phone-row">
+        <div class="frame">
+          <div class="frame-label"><span>我的</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe src="../../../build/web/index.html?view=profile" title="我的"></iframe>
+          </div></div></div>
+        </div>
+        <div class="frame">
+          <div class="frame-label"><span>AI 好友</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe src="../../../build/web/index.html?view=friends" title="AI 好友"></iframe>
+          </div></div></div>
+        </div>
+        <div class="frame">
+          <div class="frame-label"><span>关于</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe src="../../../build/web/index.html?view=about" title="关于"></iframe>
+          </div></div></div>
+        </div>
+      </div>
+    </section>
+
+  </body>
+
+  <script>
+    const STATUS_BAR_HTML = `
+      <div class="status-bar">
+        <span class="sb-time">9:41</span>
+        <span class="sb-island"></span>
+        <span class="sb-icons">
+          <svg width="17" height="12" viewBox="0 0 17 12" fill="#231722" aria-hidden="true">
+            <rect x="0" y="7" width="3" height="5" rx="1"/>
+            <rect x="4.5" y="4.5" width="3" height="7.5" rx="1"/>
+            <rect x="9" y="2" width="3" height="10" rx="1"/>
+            <rect x="13.5" y="0" width="3" height="12" rx="1"/>
+          </svg>
+          <svg width="16" height="12" viewBox="0 0 16 12" fill="none" aria-hidden="true">
+            <circle cx="8" cy="10.5" r="1.5" fill="#231722"/>
+            <path d="M4.8 7.8a4.5 4.5 0 0 1 6.4 0" stroke="#231722" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M1.8 4.8a8.5 8.5 0 0 1 12.4 0" stroke="#231722" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <svg width="27" height="13" viewBox="0 0 27 13" fill="none" aria-hidden="true">
+            <rect x="0.5" y="0.5" width="22" height="12" rx="3.5" stroke="#231722"/>
+            <rect x="2" y="2" width="16" height="9" rx="2" fill="#231722"/>
+            <path d="M24.5 4.5v4" stroke="#231722" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </span>
+      </div>`;
+
+    const HOME_BAR_HTML = `
+      <div class="home-bar-area">
+        <div class="home-bar"></div>
+      </div>`;
+
+    document.querySelectorAll('.screen').forEach(screen => {
+      const iframe = screen.querySelector('iframe');
+      if (!iframe) return;
+      const iframeArea = document.createElement('div');
+      iframeArea.className = 'iframe-area';
+      iframeArea.appendChild(iframe);
+      screen.innerHTML = STATUS_BAR_HTML;
+      screen.appendChild(iframeArea);
+      screen.insertAdjacentHTML('beforeend', HOME_BAR_HTML);
+    });
+  </script>
+</html>

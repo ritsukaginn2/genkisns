@@ -11,12 +11,14 @@ class HomePage extends StatelessWidget {
     required this.posts,
     required this.onOpenPost,
     required this.onCreatePost,
+    required this.onOpenProfile,
   });
 
   final UserProfile user;
   final List<Post> posts;
   final ValueChanged<Post> onOpenPost;
   final VoidCallback onCreatePost;
+  final VoidCallback onOpenProfile;
 
   @override
   Widget build(BuildContext context) {
@@ -32,6 +34,7 @@ class HomePage extends StatelessWidget {
                 postCount: posts.length,
                 totalLikes: totalLikes,
                 onCreatePost: onCreatePost,
+                onOpenProfile: onOpenProfile,
               ),
             ),
             if (posts.isEmpty)
@@ -68,12 +71,14 @@ class _ProfileHeader extends StatelessWidget {
     required this.postCount,
     required this.totalLikes,
     required this.onCreatePost,
+    required this.onOpenProfile,
   });
 
   final UserProfile user;
   final int postCount;
   final int totalLikes;
   final VoidCallback onCreatePost;
+  final VoidCallback onOpenProfile;
 
   @override
   Widget build(BuildContext context) {
@@ -89,10 +94,50 @@ class _ProfileHeader extends StatelessWidget {
         children: [
           Row(
             children: [
-              AvatarMark(
-                initial: user.avatarInitial,
-                color: AppColors.coral,
-                size: 72,
+              Semantics(
+                button: true,
+                label: '打开我的',
+                child: GestureDetector(
+                  onTap: onOpenProfile,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      AvatarMark(
+                        initial: user.avatarInitial,
+                        color: AppColors.coral,
+                        size: 72,
+                      ),
+                      Positioned(
+                        right: -2,
+                        bottom: -2,
+                        child: Container(
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: AppColors.background,
+                              width: 2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.10),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: const Icon(
+                            Icons.person_outline,
+                            color: AppColors.coral,
+                            size: 14,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
               const SizedBox(width: AppSpacing.xl),
               Expanded(
@@ -269,7 +314,9 @@ class _PostTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final imageColor = post.imageColors.isEmpty ? AppColors.softPink : post.imageColors.first;
+    final imageColor = post.imageColors.isEmpty
+        ? AppColors.softPink
+        : post.imageColors.first;
 
     return InkWell(
       onTap: onTap,
@@ -317,7 +364,11 @@ class _PostTile extends StatelessWidget {
                           style: Theme.of(context).textTheme.labelMedium,
                         ),
                       ),
-                      const Icon(Icons.favorite, color: AppColors.coral, size: 14),
+                      const Icon(
+                        Icons.favorite,
+                        color: AppColors.coral,
+                        size: 14,
+                      ),
                       const SizedBox(width: AppSpacing.xs),
                       Text(
                         '${post.likeCount}',

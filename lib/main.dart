@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'mock/mock_data.dart';
 import 'models.dart';
 import 'pages/about_page.dart';
+import 'pages/board_preview_page.dart';
 import 'pages/create_post_page.dart';
 import 'pages/friends_page.dart';
-import 'pages/onboarding_page.dart';
 import 'pages/design_directions_page.dart';
 import 'pages/home_page.dart';
 import 'pages/post_detail_page.dart';
@@ -48,51 +48,93 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
 
     final Widget home;
     if (fragment == '/designs' || fragment == 'designs' || view == 'designs') {
-      home = const DesignDirectionsPage();
+      home = const DesignDirectionsPage(showAppBar: true);
     } else {
       home = switch (view) {
         'home' => HomePage(
-            user: defaultUser,
-            posts: mockPosts,
-            onOpenPost: (_) {},
-            onCreatePost: () {},
-          ),
+          user: defaultUser,
+          posts: mockPosts,
+          onOpenPost: (_) {},
+          onCreatePost: () {},
+          onOpenProfile: () {},
+        ),
         'home-empty' => HomePage(
-            user: defaultUser,
-            posts: const [],
-            onOpenPost: (_) {},
-            onCreatePost: () {},
-          ),
+          user: defaultUser,
+          posts: const [],
+          onOpenPost: (_) {},
+          onCreatePost: () {},
+          onOpenProfile: () {},
+        ),
         'create' => CreatePostPage(onPublish: (_) {}),
+        'create-images' => CreatePostPage(
+          onPublish: (_) {},
+          initialText: '今天买到喜欢很久的小东西，想偷偷炫耀一下。',
+          initialImageColors: const [
+            AppColors.coral,
+            AppColors.teal,
+            AppColors.blue,
+          ],
+        ),
+        'create-full' => CreatePostPage(
+          onPublish: (_) {},
+          initialText: '九宫格快乐存档。每一张都想被认真看见。',
+          initialImageColors: const [
+            AppColors.coral,
+            AppColors.teal,
+            AppColors.blue,
+            AppColors.yellow,
+            Color(0xFF8E6BBE),
+            Color(0xFF5E8C61),
+            Color(0xFFB95D7A),
+            Color(0xFF668DA8),
+            Color(0xFFB27C46),
+          ],
+        ),
         'detail' => PostDetailPage(post: mockPosts.first),
+        'detail-text' => PostDetailPage(post: mockPosts.last),
+        'detail-liked' => PostDetailPage(
+          post: mockPosts.first,
+          initialPostLiked: true,
+        ),
+        'detail-comment-liked' => PostDetailPage(
+          post: mockPosts.first,
+          initialLikedCommentIds: {'c1'},
+        ),
+        'detail-reply' => PostDetailPage(
+          post: mockPosts.first,
+          initialReplyTargetCommentId: 'c1',
+        ),
         'profile' => ProfilePage(
-            user: defaultUser,
-            friends: presetFriends.take(5).toList(),
-            postCount: mockPosts.length,
-            onOpenAbout: () {},
-            onOpenUiLab: () {},
-            onOpenFriends: () {},
-          ),
+          user: defaultUser,
+          friends: presetFriends.take(5).toList(),
+          postCount: mockPosts.length,
+          onOpenAbout: () {},
+          onOpenUiLab: () {},
+          onOpenFriends: () {},
+        ),
         'about' => const AboutPage(),
         'friends' => FriendsPage(friends: presetFriends.take(5).toList()),
-        'onboarding-1' => OnboardingPage(
-            initialStep: 0,
-            onComplete: (u, f) {},
-          ),
-        'onboarding-2' => OnboardingPage(
-            initialStep: 1,
-            onComplete: (u, f) {},
-          ),
-        'onboarding-3' => OnboardingPage(
-            initialStep: 2,
-            onComplete: (u, f) {},
-          ),
+        'board-navigation' => const BoardPreviewPage(
+          kind: BoardPreviewKind.navigation,
+        ),
+        'board-feedback' => const BoardPreviewPage(
+          kind: BoardPreviewKind.feedback,
+        ),
+        'board-components' => const BoardPreviewPage(
+          kind: BoardPreviewKind.components,
+        ),
+        'board-components-core' => const BoardPreviewPage(
+          kind: BoardPreviewKind.componentsCore,
+        ),
+        'board-components-content' => const BoardPreviewPage(
+          kind: BoardPreviewKind.componentsContent,
+        ),
         _ => GenkiShell(
-            user: user,
-            friends: selectedFriends,
-            posts: posts,
-            onPostCreated: _addPost,
-          ),
+          user: user,
+          friends: selectedFriends,
+          posts: posts,
+          onPostCreated: _addPost,
+        ),
       };
     }
 
@@ -149,66 +191,58 @@ class GenkiShell extends StatefulWidget {
 }
 
 class _GenkiShellState extends State<GenkiShell> {
-  int currentIndex = 0;
-
   @override
   Widget build(BuildContext context) {
-    final pages = [
-      HomePage(
-        user: widget.user,
-        posts: widget.posts,
-        onOpenPost: _openPost,
-        onCreatePost: () => setState(() => currentIndex = 1),
-      ),
-      CreatePostPage(onPublish: _publishPost),
-      ProfilePage(
-        user: widget.user,
-        friends: widget.friends,
-        postCount: widget.posts.length,
-        onOpenAbout: _openAbout,
-        onOpenUiLab: _openUiLab,
-        onOpenFriends: _openFriends,
-      ),
-    ];
-
-    return Scaffold(
-      body: IndexedStack(index: currentIndex, children: pages),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: currentIndex,
-        onTap: (index) => setState(() => currentIndex = index),
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: '首页',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.add_circle_outline),
-            activeIcon: Icon(Icons.add_circle),
-            label: '发布',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: '我的',
-          ),
-        ],
-      ),
+    return HomePage(
+      user: widget.user,
+      posts: widget.posts,
+      onOpenPost: _openPost,
+      onCreatePost: _openCreatePost,
+      onOpenProfile: _openProfile,
     );
   }
 
   void _publishPost(PostDraft draft) {
     widget.onPostCreated(draft);
-    setState(() => currentIndex = 0);
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('已发布，AI 评论会陆续出现')));
+    setState(() {});
+    if (Navigator.canPop(context)) {
+      Navigator.of(context).pop();
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        duration: Duration(milliseconds: 1600),
+        content: Text('已发布，AI 评论会陆续出现'),
+      ),
+    );
+  }
+
+  void _openCreatePost() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CreatePostPage(onPublish: _publishPost),
+      ),
+    );
   }
 
   void _openPost(Post post) {
     Navigator.of(
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => PostDetailPage(post: post)));
+  }
+
+  void _openProfile() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProfilePage(
+          user: widget.user,
+          friends: widget.friends,
+          postCount: widget.posts.length,
+          onOpenAbout: _openAbout,
+          onOpenUiLab: _openUiLab,
+          onOpenFriends: _openFriends,
+        ),
+      ),
+    );
   }
 
   void _openAbout() {

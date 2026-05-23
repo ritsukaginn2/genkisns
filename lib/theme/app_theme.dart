@@ -29,6 +29,7 @@ class AppTheme {
 
     return ThemeData(
       useMaterial3: true,
+      fontFamily: 'GenkiNotoSansSC',
       colorScheme: colorScheme,
       scaffoldBackgroundColor: AppColors.background,
       appBarTheme: const AppBarTheme(
@@ -37,12 +38,6 @@ class AppTheme {
         centerTitle: false,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
-      ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: AppColors.surface,
-        selectedItemColor: AppColors.coral,
-        unselectedItemColor: AppColors.muted,
-        type: BottomNavigationBarType.fixed,
       ),
       cardTheme: CardThemeData(
         color: AppColors.surface,

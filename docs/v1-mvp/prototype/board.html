@@ -5,12 +5,12 @@
     <title>GenkiSNS V1 · 设计看板</title>
     <style>
       :root {
-        --phone-w: 393px;
-        --phone-h: 852px;
+        --phone-w: 402px;
+        --phone-h: 874px;
         --scale: 0.62;
         --slot-w: calc(var(--phone-w) * var(--scale));
         --slot-h: calc(var(--phone-h) * var(--scale));
-        --sb-h: 54px;
+        --sb-h: 59px;
         --hb-h: 34px;
         --bg: #1a1714;
         --surface: #232018;
@@ -32,12 +32,14 @@
         padding: 40px 48px 80px;
       }
 
+      /* ── Header ── */
       .canvas-header { margin-bottom: 48px; }
       .canvas-header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
       .canvas-header p { margin-top: 6px; font-size: 13px; color: var(--muted); }
       .canvas-header a { color: var(--accent); text-decoration: none; font-weight: 600; }
 
-      .section { margin-bottom: 56px; }
+      /* ── Section ── */
+      .section { margin-bottom: 64px; }
       .section-header {
         display: flex; align-items: baseline; gap: 12px;
         margin-bottom: 24px; padding-bottom: 12px;
@@ -49,6 +51,7 @@
       }
       .section-header .count { font-size: 11px; color: var(--border); }
 
+      /* ── Phone frames ── */
       .phone-row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
 
       .frame { display: flex; flex-direction: column; align-items: center; gap: 12px; flex-shrink: 0; }
@@ -68,14 +71,12 @@
         transform: scale(var(--scale));
         transform-origin: top left;
       }
-
       .screen {
         width: 100%; height: 100%;
         border-radius: 34px; overflow: hidden;
         display: flex; flex-direction: column;
         background: var(--app-bg);
       }
-
       .status-bar {
         flex-shrink: 0; height: var(--sb-h);
         background: var(--app-bg);
@@ -85,59 +86,301 @@
       .sb-time { font-size: 15px; font-weight: 700; color: #231722; letter-spacing: -0.2px; font-family: -apple-system, sans-serif; }
       .sb-island { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); width: 126px; height: 37px; background: #000; border-radius: 20px; }
       .sb-icons { margin-left: auto; display: flex; align-items: center; gap: 7px; }
-
-      .iframe-area { flex: 1; overflow: hidden; }
-      .iframe-area iframe { display: block; width: 100%; height: 100%; border: 0; }
-
+      .iframe-area { flex: 1; overflow: hidden; position: relative; }
+      .iframe-area iframe { display: block; width: 100%; height: 100%; border: 0; background: var(--app-bg); }
       .home-bar-area { flex-shrink: 0; height: var(--hb-h); background: var(--app-bg); display: flex; align-items: center; justify-content: center; }
       .home-bar { width: 134px; height: 5px; background: rgba(35,23,34,0.22); border-radius: 3px; }
 
-      .arrow { display: flex; align-items: center; padding-top: calc(var(--slot-h) / 2 - 8px); color: var(--border); font-size: 18px; flex-shrink: 0; user-select: none; }
+      /* ── Flow arrows ── */
+      .arrow {
+        display: flex; align-items: center;
+        padding-top: calc(var(--slot-h) / 2 - 10px);
+        color: var(--border); font-size: 20px;
+        flex-shrink: 0; user-select: none;
+      }
+      .flow-arrow {
+        display: flex; flex-direction: column; align-items: center; gap: 5px;
+        padding-top: calc(var(--slot-h) / 2 - 22px);
+        flex-shrink: 0; user-select: none; color: var(--border);
+      }
+      .flow-arrow-label {
+        font-size: 10px; color: var(--muted); font-weight: 600;
+        white-space: nowrap; letter-spacing: 0.03em;
+      }
+      .flow-arrow-glyph { font-size: 18px; }
+
+      /* ── Flow sub-groups ── */
+      .flow-group { margin-bottom: 32px; }
+      .flow-group:last-child { margin-bottom: 0; }
+      .flow-group-title {
+        font-size: 11px; font-weight: 600; color: var(--muted);
+        text-transform: uppercase; letter-spacing: 0.1em;
+        margin-bottom: 16px;
+      }
+
+      /* ── Flat component panels ── */
+      .comp-row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+      .comp-panel { display: flex; flex-direction: column; gap: 12px; flex-shrink: 0; }
+      .comp-panel-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+      .comp-panel-label span {
+        display: inline-block;
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 6px; padding: 3px 10px; font-size: 11px;
+      }
+      .comp-panel-body {
+        position: relative;
+        background: var(--app-bg);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        overflow: hidden;
+      }
+      .comp-panel-body iframe {
+        display: block;
+        width: 390px;
+        height: 680px;
+        border: 0;
+        background: var(--app-bg);
+      }
+
+      iframe[data-state="idle"],
+      iframe[data-state="loading"] {
+        visibility: hidden;
+      }
+
+      .lazy-placeholder {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        border: 0;
+        background:
+          radial-gradient(circle at 50% 35%, rgba(255,79,139,0.13), transparent 34%),
+          var(--app-bg);
+        color: #231722;
+        cursor: pointer;
+        font-family: inherit;
+        text-align: center;
+      }
+
+      .lazy-placeholder[hidden] { display: none; }
+
+      .lazy-placeholder .lazy-icon {
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        border-radius: 14px;
+        background: #ff4f8b;
+        color: white;
+        font-size: 18px;
+        box-shadow: 0 12px 30px rgba(255,79,139,0.28);
+      }
+
+      .lazy-placeholder .lazy-title {
+        max-width: 150px;
+        color: #231722;
+        font-size: 13px;
+        font-weight: 800;
+        line-height: 1.3;
+      }
+
+      .lazy-placeholder .lazy-subtitle {
+        max-width: 160px;
+        color: #806d78;
+        font-size: 11px;
+        line-height: 1.35;
+      }
     </style>
   </head>
   <body>
 
     <header class="canvas-header">
       <h1>GenkiSNS V1 · 设计全览</h1>
-      <p>
-        Phase 3b ·
-        <a href="index.html">← 单帧预览</a>
-        &nbsp;·&nbsp;
-        <a href="designs.html">UI 方向对比</a>
-      </p>
+      <p>Phase 3b · <a href="designs.html">UI 方向对比</a></p>
     </header>
 
-    <!-- Onboarding -->
-    <section class="section">
+    <!-- ════════════════ CORE ROUTES ════════════════ -->
+    <section class="section" style="--scale: 0.44;">
       <div class="section-header">
-        <h2>Onboarding</h2>
-        <span class="count">3 步</span>
+        <h2>核心路由</h2>
+        <span class="count">首页根页面 · Push / Pop / State / Sheet</span>
       </div>
-      <div class="phone-row">
-        <div class="frame">
-          <div class="frame-label"><span>① 说明</span></div>
-          <div class="phone-slot"><div class="phone"><div class="screen">
-            <iframe src="../../../build/web/index.html?view=onboarding-1" title="说明"></iframe>
-          </div></div></div>
+
+      <div class="flow-group">
+        <div class="flow-group-title">首页入口</div>
+        <div class="phone-row">
+          <div class="frame">
+            <div class="frame-label"><span>首页</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=home" title="首页"></iframe>
+            </div></div></div>
+          </div>
+          <div class="flow-arrow">
+            <span class="flow-arrow-label">发布按钮</span>
+            <span class="flow-arrow-glyph">→</span>
+          </div>
+          <div class="frame">
+            <div class="frame-label"><span>发布页</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=create" title="发布"></iframe>
+            </div></div></div>
+          </div>
+          <div class="flow-arrow">
+            <span class="flow-arrow-label">发布成功 Pop</span>
+            <span class="flow-arrow-glyph">→</span>
+          </div>
+          <div class="frame">
+            <div class="frame-label"><span>回到首页</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=home" title="发布后回到首页"></iframe>
+            </div></div></div>
+          </div>
         </div>
-        <div class="arrow">→</div>
-        <div class="frame">
-          <div class="frame-label"><span>② 创建主页</span></div>
-          <div class="phone-slot"><div class="phone"><div class="screen">
-            <iframe src="../../../build/web/index.html?view=onboarding-2" title="创建主页"></iframe>
-          </div></div></div>
+      </div>
+
+      <div class="flow-group">
+        <div class="flow-group-title">个人入口与内容详情</div>
+        <div class="phone-row">
+          <div class="frame">
+            <div class="frame-label"><span>首页</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=home" title="首页入口"></iframe>
+            </div></div></div>
+          </div>
+          <div class="flow-arrow">
+            <span class="flow-arrow-label">点头像</span>
+            <span class="flow-arrow-glyph">→</span>
+          </div>
+          <div class="frame">
+            <div class="frame-label"><span>我的页</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=profile" title="我的"></iframe>
+            </div></div></div>
+          </div>
+          <div style="width: 36px; flex-shrink: 0;"></div>
+          <div class="frame">
+            <div class="frame-label"><span>首页</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=home" title="首页卡片入口"></iframe>
+            </div></div></div>
+          </div>
+          <div class="flow-arrow">
+            <span class="flow-arrow-label">点卡片</span>
+            <span class="flow-arrow-glyph">→</span>
+          </div>
+          <div class="frame">
+            <div class="frame-label"><span>笔记详情</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=detail" title="笔记详情"></iframe>
+            </div></div></div>
+          </div>
         </div>
-        <div class="arrow">→</div>
-        <div class="frame">
-          <div class="frame-label"><span>③ 选 AI 好友</span></div>
-          <div class="phone-slot"><div class="phone"><div class="screen">
-            <iframe src="../../../build/web/index.html?view=onboarding-3" title="选 AI 好友"></iframe>
-          </div></div></div>
+      </div>
+
+      <div class="flow-group">
+        <div class="flow-group-title">我的子页面</div>
+        <div class="phone-row">
+          <div class="frame">
+            <div class="frame-label"><span>我的</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=profile" title="我的"></iframe>
+            </div></div></div>
+          </div>
+          <div class="flow-arrow">
+            <span class="flow-arrow-label">AI 好友</span>
+            <span class="flow-arrow-glyph">→</span>
+          </div>
+          <div class="frame">
+            <div class="frame-label"><span>AI 好友页</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=friends" title="AI 好友"></iframe>
+            </div></div></div>
+          </div>
+          <div style="width: 36px; flex-shrink: 0;"></div>
+          <div class="frame">
+            <div class="frame-label"><span>我的</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=profile" title="我的"></iframe>
+            </div></div></div>
+          </div>
+          <div class="flow-arrow">
+            <span class="flow-arrow-label">关于</span>
+            <span class="flow-arrow-glyph">→</span>
+          </div>
+          <div class="frame">
+            <div class="frame-label"><span>关于页</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=about" title="关于"></iframe>
+            </div></div></div>
+          </div>
+          <div style="width: 36px; flex-shrink: 0;"></div>
+          <div class="frame">
+            <div class="frame-label"><span>我的</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=profile" title="我的"></iframe>
+            </div></div></div>
+          </div>
+          <div class="flow-arrow">
+            <span class="flow-arrow-label">UI 实验室</span>
+            <span class="flow-arrow-glyph">→</span>
+          </div>
+          <div class="frame">
+            <div class="frame-label"><span>只读展示</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=designs" title="UI 实验室"></iframe>
+            </div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-group">
+        <div class="flow-group-title">详情页互动状态</div>
+        <div class="phone-row">
+          <div class="frame">
+            <div class="frame-label"><span>详情默认</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=detail" title="详情默认"></iframe>
+            </div></div></div>
+          </div>
+          <div class="flow-arrow">
+            <span class="flow-arrow-label">喜欢帖子</span>
+            <span class="flow-arrow-glyph">→</span>
+          </div>
+          <div class="frame">
+            <div class="frame-label"><span>帖子已喜欢</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=detail-liked" title="帖子已喜欢"></iframe>
+            </div></div></div>
+          </div>
+          <div class="flow-arrow">
+            <span class="flow-arrow-label">喜欢评论</span>
+            <span class="flow-arrow-glyph">→</span>
+          </div>
+          <div class="frame">
+            <div class="frame-label"><span>评论已喜欢</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=detail-comment-liked" title="评论已喜欢"></iframe>
+            </div></div></div>
+          </div>
+          <div class="flow-arrow">
+            <span class="flow-arrow-label">回复</span>
+            <span class="flow-arrow-glyph">→</span>
+          </div>
+          <div class="frame">
+            <div class="frame-label"><span>回复输入层</span></div>
+            <div class="phone-slot"><div class="phone"><div class="screen">
+              <iframe data-src="../../../build/web/index.html?view=detail-reply" title="回复输入层"></iframe>
+            </div></div></div>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- 首页 -->
+    <!-- ════════════════ HOME PAGE ════════════════ -->
     <section class="section">
       <div class="section-header">
         <h2>首页</h2>
@@ -147,74 +390,144 @@
         <div class="frame">
           <div class="frame-label"><span>有内容</span></div>
           <div class="phone-slot"><div class="phone"><div class="screen">
-            <iframe src="../../../build/web/index.html?view=home" title="首页 有内容"></iframe>
+            <iframe data-src="../../../build/web/index.html?view=home" title="首页 有内容"></iframe>
           </div></div></div>
         </div>
         <div class="frame">
           <div class="frame-label"><span>空状态</span></div>
           <div class="phone-slot"><div class="phone"><div class="screen">
-            <iframe src="../../../build/web/index.html?view=home-empty" title="首页 空状态"></iframe>
+            <iframe data-src="../../../build/web/index.html?view=home-empty" title="首页 空状态"></iframe>
           </div></div></div>
         </div>
       </div>
     </section>
 
-    <!-- 发布笔记 -->
+    <!-- ════════════════ CREATE POST ════════════════ -->
     <section class="section">
       <div class="section-header">
         <h2>发布笔记</h2>
-        <span class="count">1 个状态</span>
+        <span class="count">3 个状态</span>
       </div>
       <div class="phone-row">
         <div class="frame">
-          <div class="frame-label"><span>发布页</span></div>
+          <div class="frame-label"><span>空图</span></div>
           <div class="phone-slot"><div class="phone"><div class="screen">
-            <iframe src="../../../build/web/index.html?view=create" title="发布笔记"></iframe>
+            <iframe data-src="../../../build/web/index.html?view=create" title="发布笔记 空图"></iframe>
+          </div></div></div>
+        </div>
+        <div class="frame">
+          <div class="frame-label"><span>已添加图片</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe data-src="../../../build/web/index.html?view=create-images" title="发布笔记 图片"></iframe>
+          </div></div></div>
+        </div>
+        <div class="frame">
+          <div class="frame-label"><span>9 张满图</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe data-src="../../../build/web/index.html?view=create-full" title="发布笔记 满图"></iframe>
           </div></div></div>
         </div>
       </div>
     </section>
 
-    <!-- 笔记详情 -->
+    <!-- ════════════════ POST DETAIL ════════════════ -->
     <section class="section">
       <div class="section-header">
         <h2>笔记详情</h2>
-        <span class="count">1 个状态</span>
+        <span class="count">5 个状态</span>
       </div>
       <div class="phone-row">
         <div class="frame">
-          <div class="frame-label"><span>详情 + 评论区</span></div>
+          <div class="frame-label"><span>图文 + 评论</span></div>
           <div class="phone-slot"><div class="phone"><div class="screen">
-            <iframe src="../../../build/web/index.html?view=detail" title="笔记详情"></iframe>
+            <iframe data-src="../../../build/web/index.html?view=detail" title="笔记详情 图文"></iframe>
+          </div></div></div>
+        </div>
+        <div class="frame">
+          <div class="frame-label"><span>纯文字笔记</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe data-src="../../../build/web/index.html?view=detail-text" title="笔记详情 纯文字"></iframe>
+          </div></div></div>
+        </div>
+        <div class="frame">
+          <div class="frame-label"><span>帖子已喜欢</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe data-src="../../../build/web/index.html?view=detail-liked" title="笔记详情 帖子已喜欢"></iframe>
+          </div></div></div>
+        </div>
+        <div class="frame">
+          <div class="frame-label"><span>评论已喜欢</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe data-src="../../../build/web/index.html?view=detail-comment-liked" title="笔记详情 评论已喜欢"></iframe>
+          </div></div></div>
+        </div>
+        <div class="frame">
+          <div class="frame-label"><span>回复输入层</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe data-src="../../../build/web/index.html?view=detail-reply" title="笔记详情 回复输入层"></iframe>
           </div></div></div>
         </div>
       </div>
     </section>
 
-    <!-- 我的 -->
+    <!-- ════════════════ PROFILE & SUB-PAGES ════════════════ -->
     <section class="section">
       <div class="section-header">
-        <h2>我的</h2>
-        <span class="count">3 个页面</span>
+        <h2>我的 & 子页</h2>
+        <span class="count">4 个页面</span>
       </div>
       <div class="phone-row">
         <div class="frame">
           <div class="frame-label"><span>我的</span></div>
           <div class="phone-slot"><div class="phone"><div class="screen">
-            <iframe src="../../../build/web/index.html?view=profile" title="我的"></iframe>
+            <iframe data-src="../../../build/web/index.html?view=profile" title="我的"></iframe>
           </div></div></div>
         </div>
         <div class="frame">
           <div class="frame-label"><span>AI 好友</span></div>
           <div class="phone-slot"><div class="phone"><div class="screen">
-            <iframe src="../../../build/web/index.html?view=friends" title="AI 好友"></iframe>
+            <iframe data-src="../../../build/web/index.html?view=friends" title="AI 好友"></iframe>
           </div></div></div>
         </div>
         <div class="frame">
           <div class="frame-label"><span>关于</span></div>
           <div class="phone-slot"><div class="phone"><div class="screen">
-            <iframe src="../../../build/web/index.html?view=about" title="关于"></iframe>
+            <iframe data-src="../../../build/web/index.html?view=about" title="关于"></iframe>
           </div></div></div>
+        </div>
+        <div class="frame">
+          <div class="frame-label"><span>UI 实验室</span></div>
+          <div class="phone-slot"><div class="phone"><div class="screen">
+            <iframe data-src="../../../build/web/index.html?view=designs" title="UI 实验室"></iframe>
+          </div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════ COMPONENT LIBRARY (flat panels) ════════════════ -->
+    <section class="section">
+      <div class="section-header">
+        <h2>组件库</h2>
+        <span class="count">基础 · 内容 · 弹窗 & 反馈</span>
+      </div>
+      <div class="comp-row">
+        <div class="comp-panel">
+          <div class="comp-panel-label"><span>基础组件</span></div>
+          <div class="comp-panel-body">
+            <iframe data-src="../../../build/web/index.html?view=board-components-core" title="基础组件"></iframe>
+          </div>
+        </div>
+        <div class="comp-panel">
+          <div class="comp-panel-label"><span>内容组件</span></div>
+          <div class="comp-panel-body">
+            <iframe data-src="../../../build/web/index.html?view=board-components-content" title="内容组件"></iframe>
+          </div>
+        </div>
+        <div class="comp-panel">
+          <div class="comp-panel-label"><span>弹窗 & 反馈</span></div>
+          <div class="comp-panel-body">
+            <iframe data-src="../../../build/web/index.html?view=board-feedback" title="弹窗 & 反馈"></iframe>
+          </div>
         </div>
       </div>
     </section>
@@ -251,7 +564,8 @@
         <div class="home-bar"></div>
       </div>`;
 
-    document.querySelectorAll('.screen').forEach(screen => {
+    // Only inject phone chrome into screens that are inside a .phone shell.
+    document.querySelectorAll('.phone .screen').forEach(screen => {
       const iframe = screen.querySelector('iframe');
       if (!iframe) return;
       const iframeArea = document.createElement('div');
@@ -261,5 +575,144 @@
       screen.appendChild(iframeArea);
       screen.insertAdjacentHTML('beforeend', HOME_BAR_HTML);
     });
+
+    const MAX_ACTIVE_FRAMES = 5;
+    const activeFrames = new Map();
+    const visibleFrames = new Set();
+
+    function placeholderLabel(iframe) {
+      return iframe.getAttribute('title') || 'Flutter 预览';
+    }
+
+    function createPlaceholder(iframe) {
+      const placeholder = document.createElement('button');
+      placeholder.type = 'button';
+      placeholder.className = 'lazy-placeholder';
+      placeholder.innerHTML = `
+        <span class="lazy-icon">▶</span>
+        <span class="lazy-title">${placeholderLabel(iframe)}</span>
+        <span class="lazy-subtitle">滚动到这里时自动加载；白屏时点一下重载</span>
+      `;
+      placeholder.addEventListener('click', () => loadFrame(iframe, true));
+      iframe.parentElement.appendChild(placeholder);
+      return placeholder;
+    }
+
+    function setPlaceholderLoading(iframe, loading) {
+      const placeholder = iframe._placeholder;
+      if (!placeholder) return;
+      const icon = placeholder.querySelector('.lazy-icon');
+      const subtitle = placeholder.querySelector('.lazy-subtitle');
+      if (loading) {
+        icon.textContent = '…';
+        subtitle.textContent = '加载 Flutter 预览中';
+      } else {
+        icon.textContent = '▶';
+        subtitle.textContent = '滚动到这里时自动加载；白屏时点一下重载';
+      }
+    }
+
+    function loadFrame(iframe, forceReload = false) {
+      const src = iframe.dataset.src;
+      if (!src) return;
+      if ((iframe.dataset.state === 'loaded' || iframe.dataset.state === 'loading') && !forceReload) {
+        activeFrames.set(iframe, Date.now());
+        return;
+      }
+
+      iframe.dataset.state = 'loading';
+      activeFrames.set(iframe, Date.now());
+      setPlaceholderLoading(iframe, true);
+      if (iframe._placeholder) iframe._placeholder.hidden = false;
+      trimActiveFrames(iframe);
+
+      iframe.onload = () => {
+        if (!activeFrames.has(iframe)) return;
+        iframe.dataset.state = 'loaded';
+        activeFrames.set(iframe, Date.now());
+        window.setTimeout(() => {
+          if (iframe.dataset.state !== 'loaded') return;
+          if (iframe._placeholder) iframe._placeholder.hidden = true;
+          trimActiveFrames(iframe);
+        }, 700);
+      };
+
+      iframe.src = forceReload
+        ? `${src}${src.includes('?') ? '&' : '?'}reload=${Date.now()}`
+        : src;
+      trimActiveFrames(iframe);
+    }
+
+    function unloadFrame(iframe) {
+      if (iframe.dataset.state !== 'loaded' && iframe.dataset.state !== 'loading') {
+        return;
+      }
+      iframe.onload = null;
+      iframe.dataset.state = 'idle';
+      iframe.src = 'about:blank';
+      activeFrames.delete(iframe);
+      setPlaceholderLoading(iframe, false);
+      if (iframe._placeholder) iframe._placeholder.hidden = false;
+    }
+
+    function viewportDistance(iframe) {
+      const rect = iframe.getBoundingClientRect();
+      const center = rect.top + rect.height / 2;
+      return Math.abs(center - window.innerHeight / 2);
+    }
+
+    function trimActiveFrames(protectedFrame = null) {
+      const candidates = [...activeFrames.keys()]
+        .filter(iframe => iframe !== protectedFrame)
+        .sort((a, b) => {
+          const aVisible = visibleFrames.has(a);
+          const bVisible = visibleFrames.has(b);
+          if (aVisible !== bVisible) return aVisible ? 1 : -1;
+          if (!aVisible) return activeFrames.get(a) - activeFrames.get(b);
+          return viewportDistance(b) - viewportDistance(a);
+        });
+
+      while (activeFrames.size > MAX_ACTIVE_FRAMES && candidates.length > 0) {
+        unloadFrame(candidates.shift());
+      }
+    }
+
+    function prepareLazyFrames() {
+      const frames = [...document.querySelectorAll('iframe[data-src]')];
+
+      frames.forEach(iframe => {
+        iframe.dataset.state = 'idle';
+        iframe.loading = 'lazy';
+        iframe._placeholder = createPlaceholder(iframe);
+      });
+
+      const observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          const iframe = entry.target.querySelector('iframe[data-src]');
+          if (!iframe) return;
+
+          if (entry.isIntersecting) {
+            visibleFrames.add(iframe);
+            loadFrame(iframe);
+          } else {
+            visibleFrames.delete(iframe);
+            window.setTimeout(() => {
+              if (!visibleFrames.has(iframe)) unloadFrame(iframe);
+            }, 4500);
+          }
+        });
+      }, {
+        root: null,
+        rootMargin: '120px 0px',
+        threshold: 0.01,
+      });
+
+      frames.forEach(iframe => {
+        const shell = iframe.closest('.frame') || iframe.closest('.comp-panel') || iframe;
+        observer.observe(shell);
+      });
+    }
+
+    prepareLazyFrames();
   </script>
 </html>

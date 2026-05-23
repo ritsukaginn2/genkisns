@@ -36,6 +36,23 @@ class ProfilePage extends StatelessWidget {
           children: [
             Row(
               children: [
+                IconButton(
+                  tooltip: '返回',
+                  icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+                  onPressed: () => Navigator.maybePop(context),
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                Expanded(
+                  child: Text(
+                    '我的',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Row(
+              children: [
                 AvatarMark(
                   initial: user.avatarInitial,
                   color: AppColors.coral,

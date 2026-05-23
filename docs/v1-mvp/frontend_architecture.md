@@ -13,11 +13,11 @@ lib/
   mock/
     mock_data.dart              ← 所有 mock 数据（defaultUser / presetFriends / mockPosts）
   pages/
-    onboarding_page.dart        ← 引导流程（3 步：说明 / 创建主页 / 选 AI 好友）
     home_page.dart              ← 首页（瀑布流 / 空状态）
-    create_post_page.dart       ← 发布笔记
+    create_post_page.dart       ← 发布笔记（空图 / 有图 / 9 张图状态）
     post_detail_page.dart       ← 笔记详情（含评论区）
     profile_page.dart           ← 我的
+    friends_page.dart           ← AI 好友列表
     about_page.dart             ← 关于
     design_directions_page.dart ← UI 实验室（A/B/C，从「我的」隐藏入口进入）
   theme/
@@ -50,13 +50,14 @@ lib/
 |---|---|
 | `home` | 首页（有内容）|
 | `home-empty` | 首页（空状态）|
-| `create` | 发布笔记 |
-| `detail` | 笔记详情 |
+| `create` | 发布笔记（空图） |
+| `create-images` | 发布笔记（3 张图） |
+| `create-full` | 发布笔记（9 张图满状态） |
+| `detail` | 笔记详情（图文 + AI 评论） |
+| `detail-text` | 笔记详情（纯文字） |
 | `profile` | 我的 |
+| `friends` | AI 好友 |
 | `about` | 关于 |
-| `onboarding-1` | Onboarding — 说明 |
-| `onboarding-2` | Onboarding — 创建主页 |
-| `onboarding-3` | Onboarding — 选 AI 好友 |
 | `designs` | UI 实验室（A/B/C）|
 | （无参数）| 正式 app（GenkiShell）|
 
@@ -85,7 +86,8 @@ lib/
 
 ## 已知缺口（Phase 3b 设计看板待确认）
 
-- AI 好友列表目前是 BottomSheet，尚无独立页面，待看板阶段确认形态
-- Onboarding 流程代码已写好，但未接入 `main.dart`（下一步实装）
-- 发布成功反馈目前仅 Snackbar，是否需要独立过渡页面待确认
-- 评论加载状态未设计（V1 评论同步生成，暂无 loading 状态）
+- 页面跳转图尚未锁定：Phase 3b 需要逐个列出首页、发布、详情、我的页上的入口。
+- 共享组件尚未抽取：头像、设置项、图片格、评论项、卡片、按钮需要在 Phase 3b 形成组件清单。
+- 发布成功反馈目前仅 Snackbar，是否需要更明显的发布完成反馈待确认。
+- 评论生成中的 loading 状态暂不进入 V1 主流程，后续接入真实 LLM 时再设计。
+- Onboarding / 创建资料 / 选择初始 AI 好友已移出 V1，放入 V2 首次设置。

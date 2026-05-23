@@ -3,9 +3,18 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
 class CreatePostPage extends StatefulWidget {
-  const CreatePostPage({super.key, required this.onPublish});
+  const CreatePostPage({
+    super.key,
+    required this.onPublish,
+    this.initialText = '',
+    this.initialImageColors = const [],
+    this.showBackButton = true,
+  });
 
   final ValueChanged<PostDraft> onPublish;
+  final String initialText;
+  final List<Color> initialImageColors;
+  final bool showBackButton;
 
   @override
   State<CreatePostPage> createState() => _CreatePostPageState();
@@ -29,6 +38,16 @@ class _CreatePostPageState extends State<CreatePostPage> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    textController.text = widget.initialText;
+    for (var i = 0; i < widget.initialImageColors.length; i++) {
+      images.add(_PickedImage(id: i, color: widget.initialImageColors[i]));
+    }
+    nextImageId = widget.initialImageColors.length;
+  }
+
+  @override
   void dispose() {
     textController.dispose();
     super.dispose();
@@ -49,7 +68,8 @@ class _CreatePostPageState extends State<CreatePostPage> {
             AppSpacing.xl,
           ),
           children: [
-            const SizedBox(height: AppSpacing.sm),
+            _PageHeader(title: '发布笔记', showBackButton: widget.showBackButton),
+            const SizedBox(height: AppSpacing.md),
             Container(
               padding: const EdgeInsets.all(AppSpacing.lg),
               decoration: BoxDecoration(
@@ -113,6 +133,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
         imageColors: images.map((image) => image.color).toList(),
       ),
     );
+    if (!mounted) return;
     textController.clear();
     setState(() => images.clear());
   }
@@ -129,6 +150,32 @@ class _CreatePostPageState extends State<CreatePostPage> {
       );
       nextImageId++;
     });
+  }
+}
+
+class _PageHeader extends StatelessWidget {
+  const _PageHeader({required this.title, required this.showBackButton});
+
+  final String title;
+  final bool showBackButton;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        if (showBackButton) ...[
+          IconButton(
+            tooltip: '返回',
+            icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+            onPressed: () => Navigator.maybePop(context),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+        ],
+        Expanded(
+          child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+        ),
+      ],
+    );
   }
 }
 

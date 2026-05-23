@@ -4,91 +4,191 @@ import '../models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/avatar_mark.dart';
 
-class PostDetailPage extends StatelessWidget {
-  const PostDetailPage({super.key, required this.post});
+class PostDetailPage extends StatefulWidget {
+  const PostDetailPage({
+    super.key,
+    required this.post,
+    this.initialPostLiked = false,
+    this.initialLikedCommentIds = const <String>{},
+    this.initialReplyTargetCommentId,
+  });
 
   final Post post;
+  final bool initialPostLiked;
+  final Set<String> initialLikedCommentIds;
+  final String? initialReplyTargetCommentId;
+
+  @override
+  State<PostDetailPage> createState() => _PostDetailPageState();
+}
+
+class _PostDetailPageState extends State<PostDetailPage> {
+  late bool postLiked;
+  late Set<String> likedCommentIds;
+  String? replyTargetCommentId;
+
+  @override
+  void initState() {
+    super.initState();
+    postLiked = widget.initialPostLiked;
+    likedCommentIds = {...widget.initialLikedCommentIds};
+    replyTargetCommentId = widget.initialReplyTargetCommentId;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final replyTarget = _replyTarget;
+
     return Scaffold(
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.only(bottom: AppSpacing.xl),
+        child: Stack(
           children: [
-            Padding(
-              padding: const EdgeInsets.only(left: AppSpacing.sm, top: AppSpacing.sm),
-              child: IconButton(
-                icon: const Icon(Icons.arrow_back_ios, size: 20),
-                alignment: Alignment.centerLeft,
-                padding: EdgeInsets.zero,
-                onPressed: () {
-                  if (Navigator.canPop(context)) Navigator.pop(context);
-                },
+            ListView(
+              padding: EdgeInsets.only(
+                bottom: replyTarget == null ? AppSpacing.xl : 196,
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.sm,
-                AppSpacing.lg,
-                0,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const _AuthorHeader(),
-                  const SizedBox(height: AppSpacing.lg),
-                  if (post.imageColors.isNotEmpty) ...[
-                    _ImageGrid(colors: post.imageColors),
-                    const SizedBox(height: AppSpacing.lg),
-                  ],
-                  Text(post.text, style: Theme.of(context).textTheme.bodyLarge),
-                  const SizedBox(height: AppSpacing.lg),
-                  Row(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(
+                    left: AppSpacing.sm,
+                    top: AppSpacing.sm,
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.arrow_back_ios, size: 20),
+                    alignment: Alignment.centerLeft,
+                    padding: EdgeInsets.zero,
+                    onPressed: () {
+                      if (Navigator.canPop(context)) Navigator.pop(context);
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    AppSpacing.sm,
+                    AppSpacing.lg,
+                    0,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _Metric(
-                        icon: Icons.favorite,
-                        color: AppColors.coral,
-                        text: '${post.likeCount}',
+                      const _AuthorHeader(),
+                      const SizedBox(height: AppSpacing.lg),
+                      if (widget.post.imageColors.isNotEmpty) ...[
+                        _ImageGrid(colors: widget.post.imageColors),
+                        const SizedBox(height: AppSpacing.lg),
+                      ],
+                      Text(
+                        widget.post.text,
+                        style: Theme.of(context).textTheme.bodyLarge,
                       ),
-                      const SizedBox(width: AppSpacing.lg),
-                      _Metric(
-                        icon: Icons.mode_comment,
-                        color: AppColors.teal,
-                        text: '${post.commentCount}',
+                      const SizedBox(height: AppSpacing.lg),
+                      Row(
+                        children: [
+                          _MetricButton(
+                            icon: postLiked
+                                ? Icons.favorite
+                                : Icons.favorite_border,
+                            color: AppColors.coral,
+                            text:
+                                '${widget.post.likeCount + (postLiked ? 1 : 0)}',
+                            active: postLiked,
+                            onTap: () => setState(() => postLiked = !postLiked),
+                          ),
+                          const SizedBox(width: AppSpacing.md),
+                          _MetricButton(
+                            icon: Icons.mode_comment_outlined,
+                            color: AppColors.teal,
+                            text: '${widget.post.commentCount}',
+                            active: false,
+                            onTap: () {},
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ],
-              ),
-            ),
-            if (post.comments.isNotEmpty) ...[
-              const SizedBox(height: AppSpacing.xl),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-                child: Row(
-                  children: [
-                    Text('评论', style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(width: AppSpacing.sm),
-                    Text(
-                      '${post.comments.length}',
-                      style: Theme.of(context).textTheme.labelMedium,
+                ),
+                if (widget.post.comments.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.xl),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.lg,
                     ),
+                    child: Row(
+                      children: [
+                        Text(
+                          '评论',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Text(
+                          '${widget.post.comments.length}',
+                          style: Theme.of(context).textTheme.labelMedium,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  for (var i = 0; i < widget.post.comments.length; i++) ...[
+                    _CommentTile(
+                      comment: widget.post.comments[i],
+                      liked: likedCommentIds.contains(
+                        widget.post.comments[i].id,
+                      ),
+                      onLike: () =>
+                          _toggleCommentLike(widget.post.comments[i].id),
+                      onReply: () => setState(
+                        () => replyTargetCommentId = widget.post.comments[i].id,
+                      ),
+                    ),
+                    if (i < widget.post.comments.length - 1)
+                      const Divider(
+                        height: 1,
+                        indent: 68,
+                        endIndent: AppSpacing.lg,
+                      ),
                   ],
+                ],
+              ],
+            ),
+            if (replyTarget != null) ...[
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: () => setState(() => replyTargetCommentId = null),
+                  child: Container(color: Colors.black.withValues(alpha: 0.12)),
                 ),
               ),
-              const SizedBox(height: AppSpacing.md),
-              for (var i = 0; i < post.comments.length; i++) ...[
-                _CommentTile(comment: post.comments[i]),
-                if (i < post.comments.length - 1)
-                  const Divider(height: 1, indent: 68, endIndent: AppSpacing.lg),
-              ],
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: _ReplyComposer(
+                  comment: replyTarget,
+                  onClose: () => setState(() => replyTargetCommentId = null),
+                ),
+              ),
             ],
           ],
         ),
       ),
     );
+  }
+
+  Comment? get _replyTarget {
+    final targetId = replyTargetCommentId;
+    if (targetId == null) return null;
+    for (final comment in widget.post.comments) {
+      if (comment.id == targetId) return comment;
+    }
+    return null;
+  }
+
+  void _toggleCommentLike(String commentId) {
+    setState(() {
+      if (likedCommentIds.contains(commentId)) {
+        likedCommentIds.remove(commentId);
+      } else {
+        likedCommentIds.add(commentId);
+      }
+    });
   }
 }
 
@@ -144,29 +244,66 @@ class _ImageGrid extends StatelessWidget {
   }
 }
 
-class _Metric extends StatelessWidget {
-  const _Metric({required this.icon, required this.color, required this.text});
+class _MetricButton extends StatelessWidget {
+  const _MetricButton({
+    required this.icon,
+    required this.color,
+    required this.text,
+    required this.active,
+    required this.onTap,
+  });
 
   final IconData icon;
   final Color color;
   final String text;
+  final bool active;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: color, size: 20),
-        const SizedBox(width: AppSpacing.xs),
-        Text(text, style: Theme.of(context).textTheme.bodyMedium),
-      ],
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: active ? AppColors.softPink : AppColors.surface,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: active ? color : AppColors.line),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedScale(
+              scale: active ? 1.12 : 1,
+              duration: const Duration(milliseconds: 160),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            Text(text, style: Theme.of(context).textTheme.bodyMedium),
+          ],
+        ),
+      ),
     );
   }
 }
 
 class _CommentTile extends StatelessWidget {
-  const _CommentTile({required this.comment});
+  const _CommentTile({
+    required this.comment,
+    required this.liked,
+    required this.onLike,
+    required this.onReply,
+  });
 
   final Comment comment;
+  final bool liked;
+  final VoidCallback onLike;
+  final VoidCallback onReply;
 
   @override
   Widget build(BuildContext context) {
@@ -210,7 +347,7 @@ class _CommentTile extends StatelessWidget {
                     ),
                     const SizedBox(width: AppSpacing.lg),
                     GestureDetector(
-                      onTap: () {},
+                      onTap: onReply,
                       child: Text(
                         '回复',
                         style: TextStyle(
@@ -228,13 +365,111 @@ class _CommentTile extends StatelessWidget {
           const SizedBox(width: AppSpacing.md),
           Column(
             children: [
-              const Icon(Icons.favorite_border, size: 18, color: AppColors.muted),
-              const SizedBox(height: 2),
+              IconButton(
+                onPressed: onLike,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 32,
+                  height: 32,
+                ),
+                style: IconButton.styleFrom(
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                icon: Icon(
+                  liked ? Icons.favorite : Icons.favorite_border,
+                  size: 18,
+                  color: liked ? AppColors.coral : AppColors.muted,
+                ),
+              ),
               Text(
-                '12',
-                style: TextStyle(color: AppColors.muted, fontSize: 11),
+                liked ? '13' : '12',
+                style: TextStyle(
+                  color: liked ? AppColors.coral : AppColors.muted,
+                  fontSize: 11,
+                  fontWeight: liked ? FontWeight.w700 : FontWeight.w500,
+                ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReplyComposer extends StatelessWidget {
+  const _ReplyComposer({required this.comment, required this.onClose});
+
+  final Comment comment;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.md + MediaQuery.of(context).padding.bottom,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.14),
+            blurRadius: 26,
+            offset: const Offset(0, -8),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              AvatarMark(
+                initial: comment.actorAvatarSnapshot,
+                color: comment.actorColor,
+                size: 32,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  '回复 ${comment.actorNameSnapshot}',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              IconButton(
+                onPressed: onClose,
+                icon: const Icon(Icons.close, size: 20),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          TextField(
+            minLines: 2,
+            maxLines: 3,
+            decoration: InputDecoration(
+              hintText: '说点什么...',
+              filled: true,
+              fillColor: AppColors.background,
+              contentPadding: const EdgeInsets.all(AppSpacing.md),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: const BorderSide(color: AppColors.line),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: onClose,
+              icon: const Icon(Icons.send_rounded, size: 18),
+              label: const Text('发送'),
+            ),
           ),
         ],
       ),

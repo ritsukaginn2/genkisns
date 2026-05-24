@@ -66,6 +66,24 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
           onOpenProfile: () {},
         ),
         'create' => CreatePostPage(onPublish: (_) {}),
+        'create-image-source' => CreatePostPage(
+          onPublish: (_) {},
+          initialShowImageSourceSheet: true,
+        ),
+        'create-album-picker' => CreatePostPage(
+          onPublish: (_) {},
+          initialShowAlbumPicker: true,
+        ),
+        'create-album-reopen' => CreatePostPage(
+          onPublish: (_) {},
+          initialText: '写到一半又想再补几张照片。',
+          initialImageColors: const [
+            Color(0xFFDF7F5F),
+            Color(0xFF4A8C85),
+            Color(0xFF4C6F9D),
+          ],
+          initialShowAlbumPicker: true,
+        ),
         'create-images' => CreatePostPage(
           onPublish: (_) {},
           initialText: '今天买到喜欢很久的小东西，想偷偷炫耀一下。',
@@ -103,6 +121,23 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
         'detail-reply' => PostDetailPage(
           post: mockPosts.first,
           initialReplyTargetCommentId: 'c1',
+        ),
+        'detail-replied' => PostDetailPage(
+          post: mockPosts.first,
+          initialUserRepliesByCommentId: const {
+            'c1': ['我也很喜欢这个感觉。'],
+          },
+        ),
+        'detail-reply-delete' => PostDetailPage(
+          post: mockPosts.first,
+          initialUserRepliesByCommentId: const {
+            'c1': ['我也很喜欢这个感觉。'],
+          },
+          initialShowReplyDeleteConfirmation: true,
+        ),
+        'detail-reply-deleted' => PostDetailPage(
+          post: mockPosts.first,
+          initialUserRepliesByCommentId: const {},
         ),
         'profile' => ProfilePage(
           user: defaultUser,
@@ -208,12 +243,6 @@ class _GenkiShellState extends State<GenkiShell> {
     if (Navigator.canPop(context)) {
       Navigator.of(context).pop();
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        duration: Duration(milliseconds: 1600),
-        content: Text('已发布，AI 评论会陆续出现'),
-      ),
-    );
   }
 
   void _openCreatePost() {

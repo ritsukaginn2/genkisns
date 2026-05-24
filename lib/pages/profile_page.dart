@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/avatar_mark.dart';
+import '../widgets/page_header.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({
@@ -27,69 +28,55 @@ class ProfilePage extends StatelessWidget {
     return Scaffold(
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.lg,
-            AppSpacing.lg,
-            AppSpacing.lg,
-            AppSpacing.xl,
-          ),
+          padding: const EdgeInsets.only(bottom: AppSpacing.xl),
           children: [
-            Row(
-              children: [
-                IconButton(
-                  tooltip: '返回',
-                  icon: const Icon(Icons.arrow_back_ios_new, size: 18),
-                  onPressed: () => Navigator.maybePop(context),
-                ),
-                const SizedBox(width: AppSpacing.xs),
-                Expanded(
-                  child: Text(
-                    '我的',
-                    style: Theme.of(context).textTheme.titleLarge,
+            const PageHeader(title: '我的'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      AvatarMark(
+                        initial: user.avatarInitial,
+                        color: AppColors.coral,
+                        size: 44,
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: Text(
+                          user.nickname,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Row(
-              children: [
-                AvatarMark(
-                  initial: user.avatarInitial,
-                  color: AppColors.coral,
-                  size: 44,
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Text(
-                    user.nickname,
-                    style: Theme.of(context).textTheme.titleMedium,
+                  const SizedBox(height: AppSpacing.xl),
+                  _SettingsTile(
+                    icon: Icons.people_outline,
+                    iconColor: AppColors.teal,
+                    title: 'AI 好友',
+                    subtitle: '${friends.length} 位好友会来点赞和评论',
+                    onTap: onOpenFriends,
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            _SettingsTile(
-              icon: Icons.people_outline,
-              iconColor: AppColors.teal,
-              title: 'AI 好友',
-              subtitle: '${friends.length} 位好友会来点赞和评论',
-              onTap: onOpenFriends,
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            _SettingsTile(
-              icon: Icons.palette_outlined,
-              iconColor: AppColors.coral,
-              title: 'UI 实验室',
-              subtitle: 'A / B / C 设计方向',
-              onTap: onOpenUiLab,
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            _SettingsTile(
-              icon: Icons.info_outline,
-              iconColor: AppColors.teal,
-              title: '关于 GenkiSNS',
-              subtitle: 'AI 生成说明与隐私提示',
-              onTap: onOpenAbout,
+                  const SizedBox(height: AppSpacing.sm),
+                  _SettingsTile(
+                    icon: Icons.palette_outlined,
+                    iconColor: AppColors.coral,
+                    title: 'UI 实验室',
+                    subtitle: 'A / B / C 设计方向',
+                    onTap: onOpenUiLab,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _SettingsTile(
+                    icon: Icons.info_outline,
+                    iconColor: AppColors.teal,
+                    title: '关于 GenkiSNS',
+                    subtitle: 'AI 生成说明与隐私提示',
+                    onTap: onOpenAbout,
+                  ),
+                ],
+              ),
             ),
           ],
         ),

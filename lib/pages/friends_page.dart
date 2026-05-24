@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/avatar_mark.dart';
+import '../widgets/page_header.dart';
 
 class FriendsPage extends StatelessWidget {
   const FriendsPage({super.key, required this.friends});
@@ -16,31 +17,9 @@ class FriendsPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: const EdgeInsets.only(
-                left: AppSpacing.sm,
-                top: AppSpacing.sm,
-              ),
-              child: IconButton(
-                icon: const Icon(Icons.arrow_back_ios, size: 20),
-                alignment: Alignment.centerLeft,
-                padding: EdgeInsets.zero,
-                onPressed: () {
-                  if (Navigator.canPop(context)) Navigator.pop(context);
-                },
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.sm,
-                AppSpacing.lg,
-                AppSpacing.lg,
-              ),
-              child: Text(
-                'AI 好友',
-                style: Theme.of(context).textTheme.headlineMedium,
-              ),
+            PageHeader(
+              title: 'AI 好友',
+              titleStyle: Theme.of(context).textTheme.headlineMedium,
             ),
             Expanded(
               child: ListView.separated(
@@ -51,7 +30,8 @@ class FriendsPage extends StatelessWidget {
                   AppSpacing.xl,
                 ),
                 itemCount: friends.length,
-                separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
+                separatorBuilder: (_, _) =>
+                    const SizedBox(height: AppSpacing.md),
                 itemBuilder: (context, index) =>
                     _FriendTile(friend: friends[index]),
               ),

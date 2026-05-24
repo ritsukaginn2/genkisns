@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/page_header.dart';
+
 class DesignDirectionsPage extends StatefulWidget {
   const DesignDirectionsPage({super.key, this.showAppBar = false});
 
@@ -44,7 +46,6 @@ class _DesignDirectionsPageState extends State<DesignDirectionsPage> {
     final concept = concepts[selectedIndex];
 
     return Scaffold(
-      appBar: widget.showAppBar ? AppBar(title: const Text('UI 实验室')) : null,
       backgroundColor: concept.background,
       body: SafeArea(
         child: DefaultTextStyle(
@@ -55,6 +56,11 @@ class _DesignDirectionsPageState extends State<DesignDirectionsPage> {
           ),
           child: Column(
             children: [
+              if (widget.showAppBar)
+                PageHeader(
+                  title: 'UI 实验室',
+                  foregroundColor: concept.foreground,
+                ),
               _DirectionPicker(
                 concepts: concepts,
                 selectedIndex: selectedIndex,

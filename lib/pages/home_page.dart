@@ -314,9 +314,8 @@ class _PostTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final imageColor = post.imageColors.isEmpty
-        ? AppColors.softPink
-        : post.imageColors.first;
+    final hasImages = post.imageColors.isNotEmpty;
+    final hasText = post.text.trim().isNotEmpty;
 
     return InkWell(
       onTap: onTap,
@@ -330,24 +329,27 @@ class _PostTile extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _ImagePreview(color: imageColor, height: imageHeight),
+            if (hasImages)
+              _ImagePreview(color: post.imageColors.first, height: imageHeight),
             Padding(
-              padding: const EdgeInsets.fromLTRB(
+              padding: EdgeInsets.fromLTRB(
                 AppSpacing.md,
-                AppSpacing.sm,
+                hasImages ? AppSpacing.sm : AppSpacing.md,
                 AppSpacing.md,
                 AppSpacing.md,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    post.text,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
+                  if (hasText) ...[
+                    Text(
+                      post.text,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                  ],
                   Row(
                     children: [
                       AvatarMark(

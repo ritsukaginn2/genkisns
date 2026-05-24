@@ -95,6 +95,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
                     ),
                     child: TextField(
                       controller: textController,
+                      autofocus: _shouldAutofocusTextField,
                       minLines: 7,
                       maxLines: 12,
                       textInputAction: TextInputAction.newline,
@@ -147,6 +148,9 @@ class _CreatePostPageState extends State<CreatePostPage> {
       ),
     );
   }
+
+  bool get _shouldAutofocusTextField =>
+      !widget.initialShowImageSourceSheet && !widget.initialShowAlbumPicker;
 
   void _publish() {
     widget.onPublish(

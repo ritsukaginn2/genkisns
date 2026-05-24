@@ -70,6 +70,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
   Widget build(BuildContext context) {
     final replyTarget = _replyTarget;
     final totalCommentCount = widget.post.comments.length + _replyCount;
+    final hasText = widget.post.text.trim().isNotEmpty;
 
     return Scaffold(
       body: SafeArea(
@@ -97,11 +98,13 @@ class _PostDetailPageState extends State<PostDetailPage> {
                         _ImageGrid(colors: widget.post.imageColors),
                         const SizedBox(height: AppSpacing.lg),
                       ],
-                      Text(
-                        widget.post.text,
-                        style: Theme.of(context).textTheme.bodyLarge,
-                      ),
-                      const SizedBox(height: AppSpacing.lg),
+                      if (hasText) ...[
+                        Text(
+                          widget.post.text,
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                      ],
                       Row(
                         children: [
                           _MetricButton(

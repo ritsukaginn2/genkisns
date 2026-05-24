@@ -51,6 +51,7 @@ class _DesignDirectionsPageState extends State<DesignDirectionsPage> {
         child: DefaultTextStyle(
           style: TextStyle(
             color: concept.foreground,
+            fontFamily: 'GenkiNotoSansSC',
             height: 1.28,
             letterSpacing: 0,
           ),

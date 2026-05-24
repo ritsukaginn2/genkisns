@@ -26,6 +26,34 @@ Use `python3` for local Playwright/helper script commands in this environment.
 
 ---
 
+## [ERR-20260524-001] shell-command-substitution-in-rg
+
+**Logged**: 2026-05-24T20:15:00+08:00
+**Priority**: low
+**Status**: pending
+**Area**: tests
+
+### Summary
+An `rg` command used backticks inside a double-quoted search pattern, causing the shell to execute `flutter run` by command substitution.
+
+### Error
+```text
+rg -n "Review Surface Handoff|Phase 4 onward|Verify with `flutter run`|..."
+```
+
+### Context
+- The accidental command launched a resident `flutter run` process.
+- The process had to be killed manually, which produced a broken-pipe stack trace.
+
+### Suggested Fix
+When searching for literal text that includes backticks, wrap the pattern in single quotes or escape the backticks.
+
+### Metadata
+- Reproducible: yes
+- Related Files: /Users/ritsukaginn/.claude/skills/mobile-app-design/SKILL.md
+
+---
+
 ## [ERR-20260510-002] background-http-server-exited
 
 **Logged**: 2026-05-10T00:00:00+08:00

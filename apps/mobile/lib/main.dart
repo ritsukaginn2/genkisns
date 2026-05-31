@@ -1,0 +1,312 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+
+import 'data/repositories/ai_friend_repository.dart';
+import 'data/repositories/post_repository.dart';
+import 'data/repositories/user_repository.dart';
+import 'data/services/interaction_service.dart';
+import 'data/stores/post_store.dart';
+import 'data/stores/sqlite_post_store.dart';
+import 'design_preview/preview_routes.dart';
+import 'models.dart';
+import 'pages/about_page.dart';
+import 'pages/create_post_page.dart';
+import 'pages/design_directions_page.dart';
+import 'pages/friends_page.dart';
+import 'pages/home_page.dart';
+import 'pages/post_detail_page.dart';
+import 'pages/profile_page.dart';
+import 'theme/app_theme.dart';
+
+void main() {
+  runApp(const GenkiSnsApp());
+}
+
+typedef PostStoreFactory = Future<PostStore> Function();
+
+class GenkiSnsApp extends StatefulWidget {
+  const GenkiSnsApp({super.key, this.postStoreFactory});
+
+  final PostStoreFactory? postStoreFactory;
+
+  @override
+  State<GenkiSnsApp> createState() => _GenkiSnsAppState();
+}
+
+class _GenkiSnsAppState extends State<GenkiSnsApp> {
+  late final UserRepository userRepository;
+  late final AiFriendRepository aiFriendRepository;
+  PostRepository? postRepository;
+  Object? loadError;
+
+  @override
+  void initState() {
+    super.initState();
+    userRepository = const UserRepository();
+    aiFriendRepository = AiFriendRepository();
+    _initializeDataLayer();
+  }
+
+  @override
+  void dispose() {
+    postRepository?.close();
+    super.dispose();
+  }
+
+  Future<void> _initializeDataLayer() async {
+    try {
+      final storeFactory = widget.postStoreFactory ?? _defaultPostStoreFactory;
+      final store = await storeFactory();
+      final repository = PostRepository(
+        interactionService: InteractionService(),
+        store: store,
+      );
+      await repository.load();
+      if (!mounted) {
+        await repository.close();
+        return;
+      }
+      setState(() => postRepository = repository);
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() => loadError = error);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final uri = Uri.base;
+    final view = uri.queryParameters['view'];
+    final fragment = uri.fragment;
+
+    final previewRoute = buildPreviewRoute(view: view, fragment: fragment);
+    final home =
+        previewRoute ??
+        (postRepository == null
+            ? _StartupState(error: loadError)
+            : GenkiShell(
+                user: userRepository.getDefaultUser(),
+                friends: selectedFriends,
+                posts: posts,
+                onPostCreated: _addPost,
+                onTogglePostLike: _togglePostLike,
+                onToggleCommentLike: _toggleCommentLike,
+                onAddLocalReply: _addLocalReply,
+                onDeleteLocalReply: _deleteLocalReply,
+              ));
+
+    return MaterialApp(
+      title: 'GenkiSNS',
+      debugShowCheckedModeBanner: false,
+      locale: const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
+      supportedLocales: const [
+        Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
+        Locale('en'),
+      ],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      theme: AppTheme.light(),
+      home: home,
+    );
+  }
+
+  List<AiFriend> get selectedFriends =>
+      aiFriendRepository.listSelectedFriends();
+
+  List<Post> get posts => postRepository?.listPosts() ?? const [];
+
+  Future<Post> _addPost(PostDraft draft) async {
+    final post = await postRepository!.createPost(
+      draft,
+      user: userRepository.getDefaultUser(),
+      friends: selectedFriends,
+    );
+    setState(() {});
+    return post;
+  }
+
+  Future<Post> _togglePostLike(String postId) async {
+    final post = await postRepository!.togglePostLike(postId);
+    setState(() {});
+    return post;
+  }
+
+  Future<Post> _toggleCommentLike(String postId, String commentId) async {
+    final post = await postRepository!.toggleCommentLike(
+      postId: postId,
+      commentId: commentId,
+    );
+    setState(() {});
+    return post;
+  }
+
+  Future<Post> _addLocalReply(
+    String postId,
+    String commentId,
+    String content,
+  ) async {
+    final post = await postRepository!.addLocalReply(
+      postId: postId,
+      commentId: commentId,
+      user: userRepository.getDefaultUser(),
+      content: content,
+    );
+    setState(() {});
+    return post;
+  }
+
+  Future<Post> _deleteLocalReply(
+    String postId,
+    String commentId,
+    String replyId,
+  ) async {
+    final post = await postRepository!.deleteLocalReply(
+      postId: postId,
+      commentId: commentId,
+      replyId: replyId,
+    );
+    setState(() {});
+    return post;
+  }
+}
+
+Future<PostStore> _defaultPostStoreFactory() async {
+  if (kIsWeb) return MemoryPostStore();
+  return SqlitePostStore.open();
+}
+
+class _StartupState extends StatelessWidget {
+  const _StartupState({this.error});
+
+  final Object? error;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: error == null
+                ? const CircularProgressIndicator()
+                : Text(
+                    '本地数据加载失败，请重启 App 再试。',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class GenkiShell extends StatefulWidget {
+  const GenkiShell({
+    super.key,
+    required this.user,
+    required this.friends,
+    required this.posts,
+    required this.onPostCreated,
+    required this.onTogglePostLike,
+    required this.onToggleCommentLike,
+    required this.onAddLocalReply,
+    required this.onDeleteLocalReply,
+  });
+
+  final UserProfile user;
+  final List<AiFriend> friends;
+  final List<Post> posts;
+  final Future<Post> Function(PostDraft draft) onPostCreated;
+  final Future<Post> Function(String postId) onTogglePostLike;
+  final Future<Post> Function(String postId, String commentId)
+  onToggleCommentLike;
+  final Future<Post> Function(String postId, String commentId, String content)
+  onAddLocalReply;
+  final Future<Post> Function(String postId, String commentId, String replyId)
+  onDeleteLocalReply;
+
+  @override
+  State<GenkiShell> createState() => _GenkiShellState();
+}
+
+class _GenkiShellState extends State<GenkiShell> {
+  @override
+  Widget build(BuildContext context) {
+    return HomePage(
+      user: widget.user,
+      posts: widget.posts,
+      onOpenPost: _openPost,
+      onCreatePost: _openCreatePost,
+      onOpenProfile: _openProfile,
+    );
+  }
+
+  Future<void> _publishPost(PostDraft draft) async {
+    await widget.onPostCreated(draft);
+    if (!mounted) return;
+    setState(() {});
+    if (Navigator.canPop(context)) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  void _openCreatePost() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CreatePostPage(onPublish: _publishPost),
+      ),
+    );
+  }
+
+  void _openPost(Post post) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PostDetailPage(
+          post: post,
+          onTogglePostLike: widget.onTogglePostLike,
+          onToggleCommentLike: widget.onToggleCommentLike,
+          onAddLocalReply: widget.onAddLocalReply,
+          onDeleteLocalReply: widget.onDeleteLocalReply,
+        ),
+      ),
+    );
+  }
+
+  void _openProfile() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProfilePage(
+          user: widget.user,
+          friends: widget.friends,
+          postCount: widget.posts.length,
+          onOpenAbout: _openAbout,
+          onOpenUiLab: _openUiLab,
+          onOpenFriends: _openFriends,
+        ),
+      ),
+    );
+  }
+
+  void _openAbout() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const AboutPage()));
+  }
+
+  void _openUiLab() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const DesignDirectionsPage(showAppBar: true),
+      ),
+    );
+  }
+
+  void _openFriends() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => FriendsPage(friends: widget.friends),
+      ),
+    );
+  }
+}

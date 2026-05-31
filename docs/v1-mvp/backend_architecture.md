@@ -1,7 +1,7 @@
 # GenkiSNS V1 后端与数据架构
 
 > 日期：2026-05-24
-> 状态：Phase 4 初版
+> 状态：Phase 5 已接入本地数据库、真实图片引用与 V1 视频发布
 > 关联文档：[需求文档.md](需求文档.md)、[frontend_architecture.md](frontend_architecture.md)
 
 ---
@@ -14,7 +14,7 @@ V1 只服务一个核心闭环：
 用户发布笔记 -> 生成 AI 点赞和评论 -> 用户在详情页获得回应感
 ```
 
-因此 V1 的数据层只需要支撑单人、单次 App 会话，不做账号、云同步、跨设备、多用户关系和重启恢复。
+因此 V1 的数据层需要支撑单人、本机持久化和 App 重启恢复；不做账号、云同步、跨设备和多用户关系。
 
 ---
 
@@ -22,12 +22,23 @@ V1 只服务一个核心闭环：
 
 | 层 | V1 选择 | 原因 |
 |----|---------|------|
-| App 数据 | 会话内本地 Repository | V1 验证体验闭环，不先引入数据库复杂度 |
-| 图片 | 会话内图片引用 | V1 只需要发布页和详情页可展示本次选择的图片 |
-| LLM 密钥 | 不进入 App | 避免把供应商密钥放进客户端 |
+| App 数据 | Repository + SQLite 本地数据库 | V1 需要本机持久化，发帖和互动状态不能只存在内存里 |
+| 媒体 | 复制到 App 文档目录，SQLite 保存本地引用 | 首页和详情页需要在重启后继续回显图片或视频 |
+| LLM 密钥 | V1 不接入真实 LLM 供应商 | 不需要在 App 内保存或展示供应商密钥 |
 | 云端数据 | 不做 | V1 没有账号、同步和多设备需求 |
 
-V1 可以先用内存实现 Repository。所有页面只依赖 Repository/Service 接口，不直接依赖 mock data。这样 Phase 5 替换 mock 时不需要重写 UI。
+正式 App 使用 SQLite 实现 `PostStore`，测试和设计预览可以注入内存实现。所有页面只依赖 Repository/Service 接口，不直接依赖 mock data。
+
+### 2.1 SQLite 表设计
+
+| 表 | 保存内容 |
+|----|----------|
+| `posts` | 笔记正文、发布时间、喜欢数、用户喜欢状态、互动生成状态 |
+| `post_images` | 媒体类型、来源、本地文件引用、视频缩略图、视频时长、展示顺序、预览色 |
+| `comments` | AI 评论内容、AI 好友快照、评论喜欢数、用户喜欢状态 |
+| `local_replies` | 用户本地二级回复、目标评论、回复对象快照 |
+
+`PostRepository` 每次创建笔记、切换喜欢、回复或删除回复后，都把完整笔记聚合写回 `PostStore`。
 
 ---
 
@@ -37,9 +48,11 @@ V1 可以先用内存实现 Repository。所有页面只依赖 Repository/Servic
 |------|------|
 | `UserRepository` | 提供默认用户资料 |
 | `AiFriendRepository` | 提供预设 AI 好友列表 |
-| `PostRepository` | 创建、读取、更新本次会话内的笔记 |
-| `InteractionService` | 根据笔记内容请求 AI 互动，失败时返回备用模板 |
-| `ImagePickerService` | 处理拍照、相册多选、已选图片回显 |
+| `PostRepository` | 创建、读取、更新笔记，并把变更写入 `PostStore` |
+| `PostStore` | 定义笔记聚合的本地持久化接口 |
+| `SqlitePostStore` | 保存笔记、图片/视频、评论、喜欢状态和本地回复 |
+| `InteractionService` | 根据笔记内容和 AI 好友人设生成本地模板互动 |
+| `ImagePickerService` | 处理拍照、拍视频、相册选择、已选媒体回显、本地文件复制和媒体引用生成 |
 
 ---
 
@@ -49,10 +62,8 @@ V1 可以先用内存实现 Repository。所有页面只依赖 Repository/Servic
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `id` | `String` | V1 固定默认用户 |
 | `nickname` | `String` | 昵称 |
 | `avatarInitial` | `String` | 头像文字 |
-| `avatarColor` | `Color/String` | 头像颜色 token 或色值 |
 | `bio` | `String` | 个人简介 |
 | `ipLocation` | `String` | 发布时自动识别的属地文案 |
 
@@ -63,50 +74,52 @@ V1 可以先用内存实现 Repository。所有页面只依赖 Repository/Servic
 | `id` | `String` | 稳定角色 ID |
 | `name` | `String` | 角色名 |
 | `avatarInitial` | `String` | 头像文字 |
-| `avatarColor` | `Color/String` | 头像颜色 token 或色值 |
 | `relationship` | `String` | 与用户关系 |
 | `personality` | `String` | 性格关键词 |
 | `speakingStyle` | `String` | 说话风格 |
+| `color` | `Color` | 当前 Flutter 头像颜色 |
 
 ### 4.3 Post
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `id` | `String` | 本地生成 |
-| `authorUserId` | `String` | V1 固定为默认用户 |
-| `text` | `String` | 笔记正文；可为空，但必须和 `images` 至少一项有内容 |
-| `images` | `List<PostImage>` | 最多 9 张 |
+| `text` | `String` | 笔记正文；可为空，但必须和媒体至少一项有内容 |
+| `images` | `List<PostImageRef>` | 兼容字段：最多 9 张图片，或 1 个视频 |
 | `createdAt` | `DateTime` | 发布时间 |
-| `ipLocationSnapshot` | `String` | 发布时属地快照 |
-| `aiLikeCount` | `int` | AI 生成的点赞数 |
+| `likeCount` | `int` | AI 生成点赞数 + 当前用户喜欢状态变化 |
+| `comments` | `List<Comment>` | AI 评论和本地回复所属评论 |
 | `userLiked` | `bool` | 当前用户是否点过喜欢 |
-| `llmStatus` | `pending / success / fallback` | AI 互动生成状态 |
+| `interactionStatus` | `success / fallback` | AI 互动生成状态 |
 
-### 4.4 PostImage
+### 4.4 PostImageRef
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `id` | `String` | 本地生成 |
-| `postId` | `String` | 所属笔记 |
-| `source` | `camera / album` | 图片来源 |
-| `localRef` | `String` | 本次会话内图片引用 |
+| `type` | `image / video` | 媒体类型 |
+| `source` | `camera / album / preview` | 媒体来源 |
+| `localRef` | `String` | 本次会话内媒体引用 |
+| `thumbnailRef` | `String?` | 视频封面图本地引用 |
+| `durationMillis` | `int?` | 视频时长 |
 | `sortIndex` | `int` | 展示顺序 |
+| `previewColor` | `Color?` | 当前 Flutter 占位预览色 |
 
 ### 4.5 Comment
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `id` | `String` | 本地生成或 LLM 返回后补齐 |
+| `id` | `String` | 本地生成 |
 | `postId` | `String` | 所属笔记 |
 | `actorId` | `String` | AI 好友 ID |
 | `actorNameSnapshot` | `String` | 生成评论时的角色名快照 |
 | `actorAvatarSnapshot` | `String` | 生成评论时的头像文字快照 |
-| `actorAvatarColorSnapshot` | `Color/String` | 生成评论时的头像颜色快照 |
+| `actorColor` | `Color` | 生成评论时的头像颜色快照 |
 | `content` | `String` | 评论内容 |
 | `createdAt` | `DateTime` | 生成时间 |
-| `deliveredAt` | `DateTime` | 展示到评论区的时间 |
 | `likeCount` | `int` | 评论喜欢数 |
 | `userLiked` | `bool` | 当前用户是否喜欢该评论 |
+| `replies` | `List<LocalReply>` | 当前用户本地二级回复 |
 
 ### 4.6 LocalReply
 
@@ -114,16 +127,17 @@ V1 可以先用内存实现 Repository。所有页面只依赖 Repository/Servic
 |------|------|------|
 | `id` | `String` | 本地生成 |
 | `commentId` | `String` | 所属一级评论 |
-| `authorUserId` | `String` | V1 固定为默认用户 |
+| `authorNameSnapshot` | `String` | 回复作者名称快照 |
+| `authorAvatarSnapshot` | `String` | 回复作者头像文字快照 |
 | `targetActorNameSnapshot` | `String` | 被回复对象名称快照 |
 | `content` | `String` | 回复内容 |
 | `createdAt` | `DateTime` | 回复时间 |
 
 ---
 
-## 五、LLM 交互契约
+## 五、AI 互动生成契约
 
-App 不直接保存 LLM 密钥。V1 通过开发者预配置的 OpenAI 兼容接口或代理服务生成互动。
+V1 不接入云端 LLM。`InteractionService` 在本机根据笔记内容、媒体类型、图片数量、默认用户资料和 AI 好友人设生成点赞数与评论。生成失败时使用最小备用模板，不阻塞发帖。
 
 ### 请求
 
@@ -131,6 +145,7 @@ App 不直接保存 LLM 密钥。V1 通过开发者预配置的 OpenAI 兼容接
 {
   "post_id": "post_001",
   "text": "今天买到喜欢很久的小东西。",
+  "media_type": "image",
   "image_count": 3,
   "user": {
     "nickname": "Ritsuka",
@@ -166,9 +181,9 @@ App 不直接保存 LLM 密钥。V1 通过开发者预配置的 OpenAI 兼容接
 
 ### 失败处理
 
-- 请求失败、超时、JSON 不合法、角色 ID 不存在时，帖子仍发布成功。
+- 评论生成异常时，帖子仍发布成功。
 - 业务层使用备用模板生成至少 1 条评论。
-- `llmStatus` 记录为 `fallback`，但 V1 不需要在 UI 中展示错误。
+- `interactionStatus` 记录为 `fallback`，但 V1 不需要在 UI 中展示错误。
 
 ---
 
@@ -178,7 +193,7 @@ App 不直接保存 LLM 密钥。V1 通过开发者预配置的 OpenAI 兼容接
 |------|----------|
 | 首页 | `PostRepository.listPosts()` |
 | 发布笔记页 | `ImagePickerService`、`PostRepository.createPost()` |
-| 笔记详情页 | `PostRepository.getPost()`、`PostRepository.updatePostLike()`、`PostRepository.updateCommentLike()`、`PostRepository.addLocalReply()`、`PostRepository.deleteLocalReply()` |
+| 笔记详情页 | `PostRepository.getPost()`、`PostRepository.togglePostLike()`、`PostRepository.toggleCommentLike()`、`PostRepository.addLocalReply()`、`PostRepository.deleteLocalReply()` |
 | 我的页 | `UserRepository.getDefaultUser()`、`AiFriendRepository.listSelectedFriends()` |
 | AI 好友页 | `AiFriendRepository.listSelectedFriends()` |
 | 关于页 | 静态文案 |
@@ -190,10 +205,11 @@ Phase 4 起，前后端对齐验收必须通过 `flutter run` 在模拟器或真
 
 ## 七、实现顺序
 
-1. 建立 Repository/Service 接口。
-2. 把 `mock/mock_data.dart` 从页面直连改为 Repository 初始化数据。
-3. 实现会话内 `PostRepository`。
-4. 实现发布笔记后调用 `InteractionService`。
-5. 接入 LLM 结构化返回和 fallback。
-6. 把图片颜色 mock 替换为真实图片引用。
-7. 用现有设计板和正式 mock app 路径回归验证。
+1. 建立 Repository/Service 接口。（已完成）
+2. 把 `apps/mobile/lib/mock/mock_data.dart` 从页面直连改为 Repository 初始化数据。（已完成）
+3. 实现 `PostRepository` 写穿 `PostStore`。（已完成）
+4. 接入 SQLite 本地数据库，支持 App 重启恢复。（已完成）
+5. 实现发布笔记后调用 `InteractionService`。（已完成）
+6. 实现本地模板互动和 fallback。（已完成）
+7. 建立拍照、拍视频、App 内相册选择、已选回显、本地文件复制和媒体引用模型。（已完成）
+8. 用 `flutter run` 在模拟器或真实设备中回归验证。（本阶段必做）

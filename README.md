@@ -1,17 +1,29 @@
-# genki_sns
+# GenkiSNS
 
-A new Flutter project.
+GenkiSNS is a private virtual SNS app. The real user publishes notes locally; AI friends generate likes and comments.
 
-## Getting Started
+## Repository Layout
 
-This project is a starting point for a Flutter application.
+```text
+apps/
+  mobile/          Flutter iOS / Android app
+services/
+  llm-proxy/       V1.6 cloud LLM proxy backend
+docs/              Product, design, and architecture docs
+```
 
-A few resources to get you started if this is your first Flutter project:
+## Mobile App
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+```bash
+cd apps/mobile
+flutter pub get
+flutter analyze
+flutter test
+flutter run -d <device-id>
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+The mobile app stores V1 notes and interactions in local SQLite. V1 uses local template interactions; real LLM provider keys must not be stored in the app.
+
+## LLM Proxy
+
+The V1.6 backend service lives in `services/llm-proxy`. It will handle quota, paid entitlement, queued LLM jobs, and provider API keys on the server.

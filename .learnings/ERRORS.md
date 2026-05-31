@@ -26,6 +26,35 @@ Use `python3` for local Playwright/helper script commands in this environment.
 
 ---
 
+## [ERR-20260525-001] monorepo-move-destination-missing
+
+**Logged**: 2026-05-25T00:00:00+08:00
+**Priority**: low
+**Status**: pending
+**Area**: infra
+
+### Summary
+Attempted to move the Flutter project into `apps/mobile/` before creating the `apps/mobile` destination directory.
+
+### Error
+```text
+mv: apps/mobile/ is not a directory
+```
+
+### Context
+- Command attempted during GenkiSNS monorepo migration.
+- `apps/` and `services/llm-proxy/` existed, but `apps/mobile/` did not.
+- No files were moved by the failed command.
+
+### Suggested Fix
+Create nested destination directories explicitly with `mkdir -p apps/mobile services/llm-proxy` before moving project folders.
+
+### Metadata
+- Reproducible: yes
+- Related Files: apps/mobile
+
+---
+
 ## [ERR-20260524-001] shell-command-substitution-in-rg
 
 **Logged**: 2026-05-24T20:15:00+08:00

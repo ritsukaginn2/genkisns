@@ -1,7 +1,7 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -92,6 +92,8 @@ class PickedImageDraft {
 
 class ImagePickerService {
   const ImagePickerService();
+
+  static const _cameraChannel = MethodChannel('genki_sns/camera');
 
   static const albumPreviewColors = [
     Color(0xFFDF7F5F),
@@ -212,6 +214,44 @@ class ImagePickerService {
         thumbnailRef: await _generateVideoThumbnail(localRef),
       ),
     ];
+  }
+
+  Future<List<PickedImageDraft>> captureFromCamera({required int id}) async {
+    try {
+      final result = await _cameraChannel.invokeMapMethod<String, Object?>(
+        'capture',
+      );
+      if (result == null) return const [];
+
+      final path = result['path'] as String?;
+      final typeValue = result['type'] as String?;
+      if (path == null || path.isEmpty || typeValue == null) return const [];
+
+      final type = typeValue == 'video'
+          ? PostMediaType.video
+          : PostMediaType.image;
+      final localRef = await _copyFileToMediaDirectory(
+        File(path),
+        source: PostImageSource.camera,
+        id: id,
+      );
+      return [
+        PickedImageDraft(
+          id: id,
+          type: type,
+          albumIndex: null,
+          source: PostImageSource.camera,
+          localRef: localRef,
+          thumbnailRef: type == PostMediaType.video
+              ? await _generateVideoThumbnail(localRef)
+              : null,
+        ),
+      ];
+    } on MissingPluginException {
+      return pickFromCamera(id: id);
+    } on PlatformException {
+      return const [];
+    }
   }
 
   Future<List<PickedImageDraft>> pickFromAlbum({

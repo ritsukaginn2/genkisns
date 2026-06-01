@@ -19,6 +19,7 @@ class CreatePostPage extends StatefulWidget {
     this.initialShowAlbumPicker = false,
     this.imagePickerService = const ImagePickerService(),
     this.useMockMediaPicker = false,
+    this.mockCameraMediaType = PostMediaType.image,
   });
 
   final FutureOr<void> Function(PostDraft draft) onPublish;
@@ -29,6 +30,7 @@ class CreatePostPage extends StatefulWidget {
   final bool initialShowAlbumPicker;
   final ImagePickerService imagePickerService;
   final bool useMockMediaPicker;
+  final PostMediaType mockCameraMediaType;
 
   @override
   State<CreatePostPage> createState() => _CreatePostPageState();
@@ -216,22 +218,12 @@ class _CreatePostPageState extends State<CreatePostPage> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _ImageSourceSheet(
-        remainingSlots: maxImages - images.length,
-        canSelectVideo: !_hasImageMedia,
-        onCameraImage: () {
+        onCamera: () {
           Navigator.of(context).pop();
           if (widget.useMockMediaPicker) {
-            _addMockCameraImages(1);
+            _addMockCameraMedia();
           } else {
-            _pickCameraImage();
-          }
-        },
-        onCameraVideo: () {
-          Navigator.of(context).pop();
-          if (widget.useMockMediaPicker) {
-            _addMockCameraVideo();
-          } else {
-            _pickCameraVideo();
+            _captureCameraMedia();
           }
         },
         onAlbum: () {
@@ -303,32 +295,30 @@ class _CreatePostPageState extends State<CreatePostPage> {
     );
   }
 
-  Future<void> _pickCameraImage() async {
-    final picked = await widget.imagePickerService.pickFromCamera(
+  Future<void> _captureCameraMedia() async {
+    final picked = await widget.imagePickerService.captureFromCamera(
       id: nextImageId,
     );
     if (!mounted || picked.isEmpty) return;
 
-    setState(() {
-      images.addAll(picked);
-      nextImageId += picked.length;
-    });
+    _applyCapturedCameraMedia(picked);
   }
 
-  Future<void> _pickCameraVideo() async {
-    final picked = await widget.imagePickerService.pickVideoFromCamera(
-      id: nextImageId,
-    );
-    if (!mounted || picked.isEmpty) return;
-
+  void _applyCapturedCameraMedia(List<PickedImageDraft> picked) {
     setState(() {
-      for (final image in images) {
-        unawaited(widget.imagePickerService.deletePickedDraft(image));
+      final hasVideo = picked.any((image) => image.type == PostMediaType.video);
+      if (hasVideo) {
+        for (final image in images) {
+          unawaited(widget.imagePickerService.deletePickedDraft(image));
+        }
+        images.clear();
       }
-      images
-        ..clear()
-        ..addAll(picked);
-      nextImageId += picked.length;
+      final remainingSlots = maxImages - images.length;
+      final safePicked = hasVideo
+          ? picked.take(1)
+          : picked.take(remainingSlots);
+      images.addAll(safePicked);
+      nextImageId += safePicked.length;
     });
   }
 
@@ -433,16 +423,14 @@ class _CreatePostPageState extends State<CreatePostPage> {
     });
   }
 
-  void _addMockCameraVideo() {
-    setState(() {
-      for (final image in images) {
-        unawaited(widget.imagePickerService.deletePickedDraft(image));
-      }
-      images
-        ..clear()
-        ..add(widget.imagePickerService.fromCameraVideo(id: nextImageId));
-      nextImageId++;
-    });
+  void _addMockCameraMedia() {
+    if (widget.mockCameraMediaType == PostMediaType.video) {
+      _applyCapturedCameraMedia([
+        widget.imagePickerService.fromCameraVideo(id: nextImageId),
+      ]);
+      return;
+    }
+    _addMockCameraImages(1);
   }
 
   void _removeImage(int index) {
@@ -478,18 +466,9 @@ class _CreatePostPageState extends State<CreatePostPage> {
 }
 
 class _ImageSourceSheet extends StatelessWidget {
-  const _ImageSourceSheet({
-    required this.remainingSlots,
-    required this.canSelectVideo,
-    required this.onCameraImage,
-    required this.onCameraVideo,
-    required this.onAlbum,
-  });
+  const _ImageSourceSheet({required this.onCamera, required this.onAlbum});
 
-  final int remainingSlots;
-  final bool canSelectVideo;
-  final VoidCallback onCameraImage;
-  final VoidCallback onCameraVideo;
+  final VoidCallback onCamera;
   final VoidCallback onAlbum;
 
   @override
@@ -526,24 +505,15 @@ class _ImageSourceSheet extends StatelessWidget {
           const SizedBox(height: AppSpacing.lg),
           _ImageSourceOption(
             icon: Icons.photo_camera_outlined,
-            title: '拍照',
-            subtitle: '添加 1 张',
-            onTap: onCameraImage,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          _ImageSourceOption(
-            icon: Icons.videocam_outlined,
-            title: '拍视频',
-            subtitle: canSelectVideo ? '添加 1 个视频' : '已选择图片，不能混排视频',
-            onTap: canSelectVideo ? onCameraVideo : null,
+            title: '相机',
+            subtitle: '拍照或拍视频',
+            onTap: onCamera,
           ),
           const SizedBox(height: AppSpacing.sm),
           _ImageSourceOption(
             icon: Icons.photo_library_outlined,
             title: '相册',
-            subtitle: canSelectVideo
-                ? '图片多选或视频单选'
-                : '图片多选，最多还能选 $remainingSlots 张',
+            subtitle: '图片多选或视频单选',
             onTap: onAlbum,
           ),
           const SizedBox(height: AppSpacing.sm),
@@ -736,7 +706,7 @@ class _DeviceAlbumPickerSheetState extends State<_DeviceAlbumPickerSheet> {
       return const _AlbumStateMessage(
         icon: Icons.photo_library_outlined,
         title: '相册里还没有可选媒体',
-        subtitle: '可以先用拍照或拍视频添加。',
+        subtitle: '可以先用相机添加。',
       );
     }
 

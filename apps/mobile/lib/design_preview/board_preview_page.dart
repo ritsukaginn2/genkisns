@@ -134,14 +134,14 @@ class _NavigationPreview extends StatelessWidget {
         _RouteCard(
           from: '发布页',
           action: '点添加图片',
-          to: '图片来源选择层',
+          to: '媒体来源选择层',
           badge: 'Sheet',
           icon: Icons.add_photo_alternate_outlined,
           color: AppColors.teal,
         ),
         SizedBox(height: AppSpacing.sm),
         _RouteCard(
-          from: '图片来源选择层',
+          from: '媒体来源选择层',
           action: '点相册',
           to: '相册多选层',
           badge: 'Sheet',

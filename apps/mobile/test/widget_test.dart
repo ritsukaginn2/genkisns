@@ -114,7 +114,9 @@ void main() {
     expect(tester.testTextInput.isVisible, isFalse);
   });
 
-  testWidgets('create page can add a mock camera video', (tester) async {
+  testWidgets('create page can add a mock camera video from camera entry', (
+    tester,
+  ) async {
     PostDraft? publishedDraft;
 
     await tester.pumpWidget(
@@ -124,13 +126,14 @@ void main() {
             publishedDraft = draft;
           },
           useMockMediaPicker: true,
+          mockCameraMediaType: PostMediaType.video,
         ),
       ),
     );
 
     await tester.tap(find.byIcon(Icons.add_photo_alternate_outlined));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('拍视频'));
+    await tester.tap(find.text('相机'));
     await tester.pumpAndSettle();
 
     expect(find.text('1 个视频'), findsOneWidget);

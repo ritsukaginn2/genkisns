@@ -81,10 +81,14 @@ class ICloudBackupService {
       );
     }
 
-    final tmpRoot = Directory('${backupRoot.path}.tmp');
-    final previousRoot = Directory('${backupRoot.path}.previous');
+    // Use local temp directory for staging instead of iCloud container, to avoid
+    // non-atomic renames and iCloud sync interference during backup.
+    final localTmpDir = await getTemporaryDirectory();
+    final tmpRoot = Directory(p.join(
+      localTmpDir.path,
+      'genki_sns_backup_${DateTime.now().millisecondsSinceEpoch}',
+    ));
     await _deleteDirectoryIfExists(tmpRoot);
-    await _deleteDirectoryIfExists(previousRoot);
     await tmpRoot.create(recursive: true);
 
     await _replaceDirectory(
@@ -108,11 +112,19 @@ class ICloudBackupService {
 
     final marker = _backupMarker(tmpRoot);
     await marker.writeAsString(DateTime.now().toIso8601String(), flush: true);
-    await _replaceDirectoryAtomically(
-      source: tmpRoot,
-      target: backupRoot,
-      previous: previousRoot,
-    );
+    final previousRoot = Directory(p.join(
+      localTmpDir.path,
+      'genki_sns_backup_previous',
+    ));
+    try {
+      await _replaceDirectoryAtomically(
+        source: tmpRoot,
+        target: backupRoot,
+        previous: previousRoot,
+      );
+    } finally {
+      await _deleteDirectoryIfExists(previousRoot);
+    }
     return status();
   }
 

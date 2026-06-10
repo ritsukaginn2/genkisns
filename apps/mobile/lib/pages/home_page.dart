@@ -284,19 +284,18 @@ class _PostColumn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        for (var i = 0; i < posts.length; i++) ...[
-          _PostTile(
-            key: ValueKey(posts[i].id),
-            user: user,
-            post: posts[i],
-            imageHeight: (i.isEven == startTall) ? 178 : 124,
-            onTap: () => onOpenPost(posts[i]),
-          ),
-          const SizedBox(height: AppSpacing.md),
-        ],
-      ],
+    return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: posts.length,
+      itemBuilder: (context, i) => _PostTile(
+        key: ValueKey(posts[i].id),
+        user: user,
+        post: posts[i],
+        imageHeight: (i.isEven == startTall) ? 178 : 124,
+        onTap: () => onOpenPost(posts[i]),
+      ),
+      separatorBuilder: (context, _) => const SizedBox(height: AppSpacing.md),
     );
   }
 }

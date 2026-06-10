@@ -439,18 +439,19 @@ class ImagePickerService {
   Future<List<DeviceAlbumPathOption>> _buildAlbumOptions(
     List<AssetPathEntity> paths,
   ) async {
-    final albumOptions = <DeviceAlbumPathOption>[];
-    for (final albumPath in paths) {
-      albumOptions.add(
+    // Fetch all asset counts in parallel instead of sequentially
+    final counts = await Future.wait(
+      paths.map((path) => path.assetCountAsync),
+    );
+    return [
+      for (var i = 0; i < paths.length; i++)
         DeviceAlbumPathOption(
-          id: albumPath.id,
-          name: albumPath.name,
-          assetCount: await albumPath.assetCountAsync,
-          path: albumPath,
+          id: paths[i].id,
+          name: paths[i].name,
+          assetCount: counts[i],
+          path: paths[i],
         ),
-      );
-    }
-    return albumOptions;
+    ];
   }
 
   Future<void> openAlbumSettings() => PhotoManager.openSetting();

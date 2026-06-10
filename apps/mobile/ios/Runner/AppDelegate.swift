@@ -85,6 +85,8 @@ enum ICloudBackupDownloader {
         for url in gatingFiles {
           try? fm.startDownloadingUbiquitousItem(at: url)
         }
+        // mediaDir itself may be a placeholder — download it first before enumerating.
+        try? fm.startDownloadingUbiquitousItem(at: mediaDir)
         if let enumerator = fm.enumerator(at: mediaDir, includingPropertiesForKeys: nil) {
           for case let url as URL in enumerator {
             try? fm.startDownloadingUbiquitousItem(at: url)

@@ -48,6 +48,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
   _PendingReplyDelete? pendingReplyDelete;
   int? previewMediaIndex;
   bool showPostActions = false;
+  bool _isMutating = false;
   bool pendingPostDelete = false;
 
   @override
@@ -127,9 +128,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
                             color: AppColors.coral,
                             text: '${post.likeCount}',
                             active: post.userLiked,
-                            onTap: () {
-                              _togglePostLike();
-                            },
+                            enabled: !_isMutating,
+                            onTap: _isMutating ? null : () => _togglePostLike(),
                           ),
                           const SizedBox(width: AppSpacing.md),
                           _MetricButton(
@@ -175,6 +175,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                       replies: post.comments[i].replies,
                       onDeleteReply: (reply) =>
                           _openDeleteReply(post.comments[i].id, reply),
+                      enabled: !_isMutating,
                     ),
                     if (i < post.comments.length - 1)
                       const Divider(
@@ -332,71 +333,103 @@ class _PostDetailPageState extends State<PostDetailPage> {
   }
 
   Future<void> _deleteCurrentPost() async {
-    final callback = widget.onDeletePost;
-    if (callback != null) {
-      await callback(post.id);
+    if (_isMutating) return;
+    setState(() => _isMutating = true);
+    try {
+      final callback = widget.onDeletePost;
+      if (callback != null) {
+        await callback(post.id);
+      }
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } finally {
+      if (mounted) {
+        setState(() => _isMutating = false);
+      }
     }
-    if (!mounted) return;
-    Navigator.of(context).pop();
   }
 
   Future<void> _togglePostLike() async {
-    final callback = widget.onTogglePostLike;
-    if (callback != null) {
-      final updatedPost = await callback(post.id);
-      if (!mounted) return;
-      setState(() => post = updatedPost);
-      return;
-    }
+    if (_isMutating) return;
+    setState(() => _isMutating = true);
+    try {
+      final callback = widget.onTogglePostLike;
+      if (callback != null) {
+        final updatedPost = await callback(post.id);
+        if (!mounted) return;
+        setState(() => post = updatedPost);
+        return;
+      }
 
-    setState(() => post = _toggleLocalPostLike(post));
+      setState(() => post = _toggleLocalPostLike(post));
+    } finally {
+      if (mounted) {
+        setState(() => _isMutating = false);
+      }
+    }
   }
 
   Future<void> _toggleCommentLike(String commentId) async {
-    final callback = widget.onToggleCommentLike;
-    if (callback != null) {
-      final updatedPost = await callback(post.id, commentId);
-      if (!mounted) return;
-      setState(() => post = updatedPost);
-      return;
-    }
+    if (_isMutating) return;
+    setState(() => _isMutating = true);
+    try {
+      final callback = widget.onToggleCommentLike;
+      if (callback != null) {
+        final updatedPost = await callback(post.id, commentId);
+        if (!mounted) return;
+        setState(() => post = updatedPost);
+        return;
+      }
 
-    setState(() {
-      post = post.copyWith(
-        comments: [
-          for (final comment in post.comments)
-            if (comment.id == commentId)
-              _toggleLocalCommentLike(comment)
-            else
-              comment,
-        ],
-      );
-    });
+      setState(() {
+        post = post.copyWith(
+          comments: [
+            for (final comment in post.comments)
+              if (comment.id == commentId)
+                _toggleLocalCommentLike(comment)
+              else
+                comment,
+          ],
+        );
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isMutating = false);
+      }
+    }
   }
 
   Future<void> _submitReply(Comment targetComment, String content) async {
     final trimmed = content.trim();
     if (trimmed.isEmpty) return;
+    if (_isMutating) return;
 
-    final callback = widget.onAddLocalReply;
-    if (callback != null) {
-      final updatedPost = await callback(post.id, targetComment.id, trimmed);
-      if (!mounted) return;
+    setState(() => _isMutating = true);
+    try {
+      final callback = widget.onAddLocalReply;
+      if (callback != null) {
+        final updatedPost = await callback(post.id, targetComment.id, trimmed);
+        if (!mounted) return;
+        setState(() {
+          post = updatedPost;
+          replyTargetCommentId = null;
+        });
+        return;
+      }
+
       setState(() {
-        post = updatedPost;
+        post = _appendLocalReply(
+          post: post,
+          targetComment: targetComment,
+          content: trimmed,
+        );
         replyTargetCommentId = null;
       });
-      return;
+    } finally {
+      if (mounted) {
+        setState(() => _isMutating = false);
+      }
     }
-
-    setState(() {
-      post = _appendLocalReply(
-        post: post,
-        targetComment: targetComment,
-        content: trimmed,
-      );
-      replyTargetCommentId = null;
-    });
   }
 
   void _openDeleteReply(String commentId, LocalReply reply) {
@@ -416,30 +449,38 @@ class _PostDetailPageState extends State<PostDetailPage> {
   Future<void> _deletePendingReply() async {
     final target = pendingReplyDelete;
     if (target == null) return;
+    if (_isMutating) return;
 
-    final callback = widget.onDeleteLocalReply;
-    if (callback != null) {
-      final updatedPost = await callback(
-        post.id,
-        target.commentId,
-        target.reply.id,
-      );
-      if (!mounted) return;
+    setState(() => _isMutating = true);
+    try {
+      final callback = widget.onDeleteLocalReply;
+      if (callback != null) {
+        final updatedPost = await callback(
+          post.id,
+          target.commentId,
+          target.reply.id,
+        );
+        if (!mounted) return;
+        setState(() {
+          post = updatedPost;
+          pendingReplyDelete = null;
+        });
+        return;
+      }
+
       setState(() {
-        post = updatedPost;
+        post = _removeLocalReply(
+          post: post,
+          commentId: target.commentId,
+          replyId: target.reply.id,
+        );
         pendingReplyDelete = null;
       });
-      return;
+    } finally {
+      if (mounted) {
+        setState(() => _isMutating = false);
+      }
     }
-
-    setState(() {
-      post = _removeLocalReply(
-        post: post,
-        commentId: target.commentId,
-        replyId: target.reply.id,
-      );
-      pendingReplyDelete = null;
-    });
   }
 
   Post _buildInitialPost() {
@@ -671,18 +712,20 @@ class _MetricButton extends StatelessWidget {
     required this.text,
     required this.active,
     required this.onTap,
+    this.enabled = true,
   });
 
   final IconData icon;
   final Color color;
   final String text;
   final bool active;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: onTap,
+      onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(999),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
@@ -719,6 +762,7 @@ class _CommentTile extends StatelessWidget {
     required this.onReply,
     required this.replies,
     required this.onDeleteReply,
+    this.enabled = true,
   });
 
   final Comment comment;
@@ -726,6 +770,7 @@ class _CommentTile extends StatelessWidget {
   final VoidCallback onReply;
   final List<LocalReply> replies;
   final ValueChanged<LocalReply> onDeleteReply;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -804,7 +849,7 @@ class _CommentTile extends StatelessWidget {
           Column(
             children: [
               IconButton(
-                onPressed: onLike,
+                onPressed: enabled ? onLike : null,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints.tightFor(
                   width: 32,

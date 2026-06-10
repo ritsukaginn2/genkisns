@@ -22,6 +22,7 @@ class SqlitePostStore implements PostStore {
       version: 3,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
+        await db.execute('PRAGMA journal_mode = WAL');
       },
       onCreate: (db, version) async {
         await db.execute('''
@@ -177,7 +178,7 @@ class SqlitePostStore implements PostStore {
 
   @override
   Future<void> prepareForBackup() async {
-    await _database.rawQuery('PRAGMA wal_checkpoint(FULL)');
+    await _database.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
   }
 
   @override

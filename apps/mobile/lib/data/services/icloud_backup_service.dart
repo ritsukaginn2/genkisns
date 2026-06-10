@@ -277,8 +277,6 @@ class ICloudBackupService {
   List<String> get _databaseFilenames => const [
     _databaseName,
     '$_databaseName-wal',
-    '$_databaseName-shm',
-    '$_databaseName-journal',
   ];
 
   File _backupMarker(Directory backupRoot) {

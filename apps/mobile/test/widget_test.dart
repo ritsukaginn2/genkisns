@@ -46,16 +46,41 @@ void main() {
     expect(find.byIcon(Icons.image), findsNothing);
   });
 
-  testWidgets('create page autofocuses text field by default', (tester) async {
+  testWidgets('create page focuses text field after the push transition', (
+    tester,
+  ) async {
     await tester.pumpWidget(
-      MaterialApp(home: CreatePostPage(onPublish: (_) {})),
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => CreatePostPage(onPublish: (_) {}),
+                  ),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
 
-    final textField = tester.widget<TextField>(find.byType(TextField));
-    expect(textField.autofocus, isTrue);
+    await tester.tap(find.text('open'));
+    await tester.pump();
+    // Mid-transition the keyboard must stay down so it does not slide up on
+    // top of the route animation.
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.testTextInput.isVisible, isFalse);
+
+    // Once the transition settles the text field gains focus.
+    await tester.pumpAndSettle();
+    expect(tester.testTextInput.isVisible, isTrue);
   });
 
-  testWidgets('create page does not autofocus behind initial media sheet', (
+  testWidgets('create page does not focus behind initial media sheet', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -67,8 +92,8 @@ void main() {
       ),
     );
 
-    final textField = tester.widget<TextField>(find.byType(TextField));
-    expect(textField.autofocus, isFalse);
+    await tester.pump(const Duration(milliseconds: 260));
+    expect(tester.testTextInput.isVisible, isFalse);
   });
 
   testWidgets('create page allows image-only posts', (tester) async {
@@ -186,5 +211,19 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, '删除回复'));
     await tester.pumpAndSettle();
     expect(find.text('我也这么觉得。'), findsNothing);
+
+    await tester.tap(find.byTooltip('更多操作'));
+    await tester.pumpAndSettle();
+    expect(find.text('删除笔记'), findsOneWidget);
+
+    await tester.tap(find.text('删除笔记'));
+    await tester.pumpAndSettle();
+    expect(find.text('删除这篇笔记？'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, '删除笔记'));
+    await tester.pumpAndSettle();
+    expect(find.text('笔记详情'), findsNothing);
+    expect(find.text('今天需要一点回应。'), findsNothing);
+    expect(find.text('还没有笔记'), findsOneWidget);
   });
 }

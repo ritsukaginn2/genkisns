@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../data/services/image_picker_service.dart';
 import '../models.dart';
 import '../theme/app_theme.dart';
+import '../widgets/media_preview_overlay.dart';
 import '../widgets/page_header.dart';
 import '../widgets/post_image_view.dart';
 
@@ -38,10 +39,13 @@ class CreatePostPage extends StatefulWidget {
 
 class _CreatePostPageState extends State<CreatePostPage> {
   final textController = TextEditingController();
+  final textFocusNode = FocusNode();
   final List<PickedImageDraft> images = [];
   int nextImageId = 0;
+  Animation<double>? transitionAnimation;
   bool didOpenInitialPicker = false;
   bool isPublishing = false;
+  bool hasText = false;
 
   static const maxImages = 9;
 
@@ -49,6 +53,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
   void initState() {
     super.initState();
     textController.text = widget.initialText;
+    hasText = widget.initialText.trim().isNotEmpty;
     for (var i = 0; i < widget.initialImageColors.length; i++) {
       final color = widget.initialImageColors[i];
       images.add(
@@ -56,19 +61,20 @@ class _CreatePostPageState extends State<CreatePostPage> {
       );
     }
     nextImageId = widget.initialImageColors.length;
+    _scheduleInitialTextFocus();
   }
 
   @override
   void dispose() {
+    transitionAnimation?.removeStatusListener(_handleTransitionStatus);
+    textFocusNode.dispose();
     textController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final canPublish =
-        !isPublishing &&
-        (textController.text.trim().isNotEmpty || images.isNotEmpty);
+    final canPublish = !isPublishing && (hasText || images.isNotEmpty);
     final selectedVideo = _selectedVideo;
     _openInitialPickerIfNeeded();
 
@@ -95,7 +101,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
                       ),
                       child: TextField(
                         controller: textController,
-                        autofocus: _shouldAutofocusTextField,
+                        focusNode: textFocusNode,
                         minLines: 7,
                         maxLines: 12,
                         textInputAction: TextInputAction.newline,
@@ -108,7 +114,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
                           focusedBorder: InputBorder.none,
                         ),
                         onTapOutside: (_) => _unfocusTextField(),
-                        onChanged: (_) => setState(() {}),
+                        onChanged: _handleTextChanged,
                       ),
                     ),
                     const SizedBox(height: AppSpacing.lg),
@@ -172,6 +178,41 @@ class _CreatePostPageState extends State<CreatePostPage> {
     FocusManager.instance.primaryFocus?.unfocus();
   }
 
+  void _scheduleInitialTextFocus() {
+    if (!_shouldAutofocusTextField) return;
+    // Raise the keyboard only after the push transition finishes. Focusing
+    // mid-animation makes the soft keyboard slide up on top of the route
+    // transition, which is the visible "卡一下" when entering this page.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final animation = ModalRoute.of(context)?.animation;
+      if (animation == null || animation.isCompleted) {
+        _focusTextFieldIfNeeded();
+        return;
+      }
+      transitionAnimation = animation
+        ..addStatusListener(_handleTransitionStatus);
+    });
+  }
+
+  void _handleTransitionStatus(AnimationStatus status) {
+    if (status != AnimationStatus.completed) return;
+    transitionAnimation?.removeStatusListener(_handleTransitionStatus);
+    transitionAnimation = null;
+    _focusTextFieldIfNeeded();
+  }
+
+  void _focusTextFieldIfNeeded() {
+    if (!mounted || !_shouldAutofocusTextField) return;
+    textFocusNode.requestFocus();
+  }
+
+  void _handleTextChanged(String value) {
+    final nextHasText = value.trim().isNotEmpty;
+    if (nextHasText == hasText) return;
+    setState(() => hasText = nextHasText);
+  }
+
   Future<void> _publish() async {
     setState(() => isPublishing = true);
     try {
@@ -186,7 +227,10 @@ class _CreatePostPageState extends State<CreatePostPage> {
       );
       if (!mounted) return;
       textController.clear();
-      setState(() => images.clear());
+      setState(() {
+        hasText = false;
+        images.clear();
+      });
     } finally {
       if (mounted) {
         setState(() => isPublishing = false);
@@ -287,9 +331,9 @@ class _CreatePostPageState extends State<CreatePostPage> {
             if (image.source == PostImageSource.album && image.assetId != null)
               image.assetId!,
         },
-        onConfirm: (selectedOptions) {
+        onConfirm: (selection) {
           Navigator.of(context).pop();
-          unawaited(_syncDeviceAlbumMedia(selectedOptions));
+          unawaited(_syncDeviceAlbumMedia(selection));
         },
       ),
     );
@@ -322,12 +366,9 @@ class _CreatePostPageState extends State<CreatePostPage> {
     });
   }
 
-  Future<void> _syncDeviceAlbumMedia(
-    List<DeviceAlbumImageOption> selectedOptions,
-  ) async {
-    final selectedAssetIds = selectedOptions
-        .map((option) => option.assetId)
-        .toSet();
+  Future<void> _syncDeviceAlbumMedia(DeviceAlbumSelection selection) async {
+    final selectedOptions = selection.loadedOptions;
+    final selectedAssetIds = selection.assetIds;
     DeviceAlbumImageOption? selectedVideo;
     for (final option in selectedOptions) {
       if (option.type == PostMediaType.video) {
@@ -593,7 +634,7 @@ class _DeviceAlbumPickerSheet extends StatefulWidget {
   final bool allowVideoSelection;
   final PostMediaType? initialSelectionType;
   final Set<String> initialSelectedAssetIds;
-  final ValueChanged<List<DeviceAlbumImageOption>> onConfirm;
+  final ValueChanged<DeviceAlbumSelection> onConfirm;
 
   @override
   State<_DeviceAlbumPickerSheet> createState() =>
@@ -601,16 +642,35 @@ class _DeviceAlbumPickerSheet extends StatefulWidget {
 }
 
 class _DeviceAlbumPickerSheetState extends State<_DeviceAlbumPickerSheet> {
-  late final Future<DeviceAlbumLoadResult> albumFuture;
+  static const pageSize = 60;
+
+  final scrollController = ScrollController();
   final selectedAssetIds = <String>{};
+  final selectedOptionsById = <String, DeviceAlbumImageOption>{};
+  final options = <DeviceAlbumImageOption>[];
+  List<DeviceAlbumPathOption> albums = const [];
+  DeviceAlbumPathOption? selectedAlbum;
   PostMediaType? selectedMediaType;
+  DeviceAlbumLoadStatus? status;
+  bool isLoading = true;
+  bool isLoadingMore = false;
+  bool hasMore = false;
+  int page = 0;
 
   @override
   void initState() {
     super.initState();
-    albumFuture = widget.imagePickerService.listDeviceAlbumOptions();
     selectedAssetIds.addAll(widget.initialSelectedAssetIds);
     selectedMediaType = widget.initialSelectionType;
+    scrollController.addListener(_maybeLoadMore);
+    unawaited(_loadFirstPage());
+  }
+
+  @override
+  void dispose() {
+    scrollController.removeListener(_maybeLoadMore);
+    scrollController.dispose();
+    super.dispose();
   }
 
   @override
@@ -636,61 +696,55 @@ class _DeviceAlbumPickerSheetState extends State<_DeviceAlbumPickerSheet> {
           ),
         ],
       ),
-      child: FutureBuilder<DeviceAlbumLoadResult>(
-        future: albumFuture,
-        builder: (context, snapshot) {
-          final result = snapshot.data;
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _DeviceAlbumHeader(
-                selectedCount: selectedAssetIds.length,
-                selectedMediaType: selectedMediaType,
-                maxSelectable: selectedMediaType == PostMediaType.video
-                    ? 1
-                    : widget.maxSelectable,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _DeviceAlbumHeader(
+            selectedCount: selectedAssetIds.length,
+            selectedMediaType: selectedMediaType,
+            maxSelectable: selectedMediaType == PostMediaType.video
+                ? 1
+                : widget.maxSelectable,
+            albumTitle: selectedAlbum?.name ?? '相册',
+            onOpenAlbums: albums.isEmpty ? null : _openAlbumList,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Expanded(child: _buildBody()),
+          const SizedBox(height: AppSpacing.lg),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: status == DeviceAlbumLoadStatus.ready
+                  ? () => widget.onConfirm(_selectedOptions())
+                  : null,
+              icon: const Icon(Icons.add_photo_alternate_outlined),
+              label: Text(
+                selectedAssetIds.isEmpty
+                    ? '完成'
+                    : selectedMediaType == PostMediaType.video
+                    ? '完成 · 已选 1 个视频'
+                    : '完成 · 已选 ${selectedAssetIds.length} 张',
               ),
-              const SizedBox(height: AppSpacing.md),
-              Expanded(child: _buildBody(snapshot, result)),
-              const SizedBox(height: AppSpacing.lg),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: result?.status == DeviceAlbumLoadStatus.ready
-                      ? () => widget.onConfirm(_selectedOptions(result!))
-                      : null,
-                  icon: const Icon(Icons.add_photo_alternate_outlined),
-                  label: Text(
-                    selectedAssetIds.isEmpty
-                        ? '完成'
-                        : selectedMediaType == PostMediaType.video
-                        ? '完成 · 已选 1 个视频'
-                        : '完成 · 已选 ${selectedAssetIds.length} 张',
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildBody(
-    AsyncSnapshot<DeviceAlbumLoadResult> snapshot,
-    DeviceAlbumLoadResult? result,
-  ) {
-    if (snapshot.connectionState != ConnectionState.done) {
+  Widget _buildBody() {
+    if (isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (result == null) {
+    final currentStatus = status;
+    if (currentStatus == null) {
       return const _AlbumStateMessage(
         icon: Icons.error_outline,
         title: '相册暂时打不开',
         subtitle: '稍后再试一次。',
       );
     }
-    if (result.status == DeviceAlbumLoadStatus.denied) {
+    if (currentStatus == DeviceAlbumLoadStatus.denied) {
       return _AlbumStateMessage(
         icon: Icons.lock_outline,
         title: '需要相册权限',
@@ -702,27 +756,33 @@ class _DeviceAlbumPickerSheetState extends State<_DeviceAlbumPickerSheet> {
         ),
       );
     }
-    if (result.status == DeviceAlbumLoadStatus.empty) {
+    if (currentStatus == DeviceAlbumLoadStatus.empty && options.isEmpty) {
       return const _AlbumStateMessage(
         icon: Icons.photo_library_outlined,
-        title: '相册里还没有可选媒体',
-        subtitle: '可以先用相机添加。',
+        title: '这个相簿里还没有可选媒体',
+        subtitle: '可以切换相簿，或先用相机添加。',
       );
     }
 
     return GridView.builder(
-      itemCount: result.options.length,
+      controller: scrollController,
+      itemCount: options.length + (hasMore || isLoadingMore ? 1 : 0),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
         crossAxisSpacing: AppSpacing.sm,
         mainAxisSpacing: AppSpacing.sm,
       ),
       itemBuilder: (context, index) {
-        final option = result.options[index];
+        if (index >= options.length) {
+          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+        }
+        final option = options[index];
         final selected = selectedAssetIds.contains(option.assetId);
         final disabled = option.isVideo && !widget.allowVideoSelection;
+        // Tapping the tile previews (zoom image / play video); only the
+        // top-right corner hot zone toggles selection.
         return GestureDetector(
-          onTap: disabled ? null : () => _toggle(option),
+          onTap: () => _openOptionPreview(option),
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -746,46 +806,65 @@ class _DeviceAlbumPickerSheetState extends State<_DeviceAlbumPickerSheet> {
                 child: _AlbumMediaBadge(option: option),
               ),
               if (disabled)
-                Container(
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.34),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: const Text(
-                    '不可混排',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
+                IgnorePointer(
+                  child: Container(
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.34),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: const Text(
+                      '不可混排',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                 ),
               Positioned(
-                right: AppSpacing.sm,
-                top: AppSpacing.sm,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 140),
-                  width: 26,
-                  height: 26,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? AppColors.coral
-                        : Colors.white.withValues(alpha: 0.88),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
-                  ),
-                  child: selected
-                      ? Text(
-                          '${_selectionOrder(option.assetId)}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 12,
+                right: 0,
+                top: 0,
+                child: IgnorePointer(
+                  ignoring: disabled,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _toggle(option),
+                    child: SizedBox(
+                    width: 46,
+                    height: 46,
+                    child: Align(
+                      alignment: Alignment.topRight,
+                      child: Padding(
+                        padding: const EdgeInsets.all(AppSpacing.sm),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 140),
+                          width: 26,
+                          height: 26,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? AppColors.coral
+                                : Colors.black.withValues(alpha: 0.32),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
                           ),
-                        )
-                      : const SizedBox.shrink(),
+                          child: selected
+                              ? Text(
+                                  '${_selectionOrder(option.assetId)}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 12,
+                                  ),
+                                )
+                              : const SizedBox.shrink(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
                 ),
               ),
             ],
@@ -795,10 +874,104 @@ class _DeviceAlbumPickerSheetState extends State<_DeviceAlbumPickerSheet> {
     );
   }
 
+  Future<void> _loadFirstPage({DeviceAlbumPathOption? album}) async {
+    setState(() {
+      isLoading = true;
+      isLoadingMore = false;
+      hasMore = false;
+      page = 0;
+      options.clear();
+      selectedAlbum = album ?? selectedAlbum;
+    });
+    final result = await widget.imagePickerService.listDeviceAlbumOptions(
+      path: selectedAlbum?.path,
+      page: 0,
+      pageSize: pageSize,
+      includeAlbums: selectedAlbum == null || albums.isEmpty,
+    );
+    if (!mounted) return;
+    setState(() {
+      if (result.albums.isNotEmpty) {
+        albums = result.albums;
+      }
+      selectedAlbum ??= albums.isEmpty ? null : albums.first;
+      status = result.status;
+      options.addAll(result.options);
+      for (final option in result.options) {
+        if (selectedAssetIds.contains(option.assetId)) {
+          selectedOptionsById[option.assetId] = option;
+        }
+      }
+      hasMore = result.hasMore;
+      isLoading = false;
+    });
+  }
+
+  Future<void> _loadMore() async {
+    if (isLoading || isLoadingMore || !hasMore) return;
+    setState(() => isLoadingMore = true);
+    final nextPage = page + 1;
+    final result = await widget.imagePickerService.listDeviceAlbumOptions(
+      path: selectedAlbum?.path,
+      page: nextPage,
+      pageSize: pageSize,
+      includeAlbums: false,
+    );
+    if (!mounted) return;
+    setState(() {
+      page = nextPage;
+      status = result.status;
+      options.addAll(result.options);
+      for (final option in result.options) {
+        if (selectedAssetIds.contains(option.assetId)) {
+          selectedOptionsById[option.assetId] = option;
+        }
+      }
+      hasMore = result.hasMore;
+      isLoadingMore = false;
+    });
+  }
+
+  void _maybeLoadMore() {
+    if (!scrollController.hasClients) return;
+    final position = scrollController.position;
+    if (position.pixels > position.maxScrollExtent - 420) {
+      unawaited(_loadMore());
+    }
+  }
+
+  Future<void> _openAlbumList() async {
+    final album = await showModalBottomSheet<DeviceAlbumPathOption>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) =>
+          _AlbumListSheet(albums: albums, selectedAlbumId: selectedAlbum?.id),
+    );
+    if (album == null || album.id == selectedAlbum?.id) return;
+    await _loadFirstPage(album: album);
+  }
+
+  void _openOptionPreview(DeviceAlbumImageOption option) {
+    Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        opaque: false,
+        barrierColor: Colors.black54,
+        transitionDuration: const Duration(milliseconds: 180),
+        pageBuilder: (_, _, _) => _AlbumOptionPreview(
+          option: option,
+          imagePickerService: widget.imagePickerService,
+        ),
+        transitionsBuilder: (_, animation, _, child) =>
+            FadeTransition(opacity: animation, child: child),
+      ),
+    );
+  }
+
   void _toggle(DeviceAlbumImageOption option) {
     setState(() {
       if (selectedAssetIds.contains(option.assetId)) {
         selectedAssetIds.remove(option.assetId);
+        selectedOptionsById.remove(option.assetId);
         if (selectedAssetIds.isEmpty) {
           selectedMediaType = null;
         }
@@ -807,31 +980,149 @@ class _DeviceAlbumPickerSheetState extends State<_DeviceAlbumPickerSheet> {
         selectedAssetIds
           ..clear()
           ..add(option.assetId);
+        selectedOptionsById.clear();
+        selectedOptionsById[option.assetId] = option;
         selectedMediaType = PostMediaType.video;
       } else {
         if (selectedMediaType == PostMediaType.video) {
           selectedAssetIds.clear();
+          selectedOptionsById.clear();
         }
         selectedMediaType = PostMediaType.image;
         if (selectedAssetIds.length < widget.maxSelectable) {
           selectedAssetIds.add(option.assetId);
+          selectedOptionsById[option.assetId] = option;
         }
       }
     });
   }
 
-  List<DeviceAlbumImageOption> _selectedOptions(DeviceAlbumLoadResult result) {
-    final optionsById = {
-      for (final option in result.options) option.assetId: option,
-    };
-    return [
-      for (final assetId in selectedAssetIds)
-        if (optionsById[assetId] != null) optionsById[assetId]!,
-    ];
+  DeviceAlbumSelection _selectedOptions() {
+    return DeviceAlbumSelection(
+      assetIds: Set.unmodifiable(selectedAssetIds),
+      loadedOptions: [
+        for (final assetId in selectedAssetIds)
+          if (selectedOptionsById[assetId] != null)
+            selectedOptionsById[assetId]!,
+      ],
+    );
   }
 
   int _selectionOrder(String assetId) {
     return selectedAssetIds.toList().indexOf(assetId) + 1;
+  }
+}
+
+@immutable
+class DeviceAlbumSelection {
+  const DeviceAlbumSelection({
+    required this.assetIds,
+    required this.loadedOptions,
+  });
+
+  final Set<String> assetIds;
+  final List<DeviceAlbumImageOption> loadedOptions;
+}
+
+class _AlbumOptionPreview extends StatefulWidget {
+  const _AlbumOptionPreview({
+    required this.option,
+    required this.imagePickerService,
+  });
+
+  final DeviceAlbumImageOption option;
+  final ImagePickerService imagePickerService;
+
+  @override
+  State<_AlbumOptionPreview> createState() => _AlbumOptionPreviewState();
+}
+
+class _AlbumOptionPreviewState extends State<_AlbumOptionPreview> {
+  PostImageRef? media;
+  bool failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_resolve());
+  }
+
+  Future<void> _resolve() async {
+    final file = await widget.imagePickerService.resolvePreviewFile(
+      widget.option,
+    );
+    if (!mounted) return;
+    if (file == null) {
+      setState(() => failed = true);
+      return;
+    }
+    setState(() {
+      media = PostImageRef(
+        id: widget.option.assetId,
+        type: widget.option.type,
+        source: PostImageSource.album,
+        localRef: file.path,
+        durationMillis: widget.option.durationMillis,
+        width: widget.option.width,
+        height: widget.option.height,
+        sortIndex: 0,
+      );
+    });
+  }
+
+  void _close() => Navigator.of(context).maybePop();
+
+  @override
+  Widget build(BuildContext context) {
+    final ready = media;
+    if (ready != null) {
+      return MediaPreviewOverlay(media: [ready], onClose: _close);
+    }
+
+    // While the full file resolves, show the already-loaded thumbnail so the
+    // preview feels instant.
+    return Material(
+      color: Colors.black.withValues(alpha: 0.92),
+      child: SafeArea(
+        child: Stack(
+          children: [
+            Center(
+              child: failed
+                  ? const Text(
+                      '打不开这个文件',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    )
+                  : Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Image.memory(
+                          widget.option.thumbnailBytes,
+                          fit: BoxFit.contain,
+                        ),
+                        const CircularProgressIndicator(color: Colors.white),
+                      ],
+                    ),
+            ),
+            Positioned(
+              top: AppSpacing.sm,
+              right: AppSpacing.sm,
+              child: IconButton.filled(
+                tooltip: '关闭预览',
+                onPressed: _close,
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white.withValues(alpha: 0.14),
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.close),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -879,18 +1170,45 @@ class _DeviceAlbumHeader extends StatelessWidget {
     required this.selectedCount,
     required this.selectedMediaType,
     required this.maxSelectable,
+    required this.albumTitle,
+    required this.onOpenAlbums,
   });
 
   final int selectedCount;
   final PostMediaType? selectedMediaType;
   final int maxSelectable;
+  final String albumTitle;
+  final VoidCallback? onOpenAlbums;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
         Expanded(
-          child: Text('相册', style: Theme.of(context).textTheme.titleLarge),
+          child: InkWell(
+            onTap: onOpenAlbums,
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      albumTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  if (onOpenAlbums != null) ...[
+                    const SizedBox(width: AppSpacing.xs),
+                    const Icon(Icons.expand_more, size: 20),
+                  ],
+                ],
+              ),
+            ),
+          ),
         ),
         Text(
           selectedMediaType == PostMediaType.video
@@ -905,6 +1223,93 @@ class _DeviceAlbumHeader extends StatelessWidget {
           icon: const Icon(Icons.close, size: 20),
         ),
       ],
+    );
+  }
+}
+
+class _AlbumListSheet extends StatelessWidget {
+  const _AlbumListSheet({required this.albums, required this.selectedAlbumId});
+
+  final List<DeviceAlbumPathOption> albums;
+  final String? selectedAlbumId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.64,
+      ),
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.lg + MediaQuery.of(context).padding.bottom,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.14),
+            blurRadius: 26,
+            offset: const Offset(0, -8),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '选择相簿',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              IconButton(
+                tooltip: '关闭',
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close, size: 20),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Flexible(
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: albums.length,
+              separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
+              itemBuilder: (context, index) {
+                final album = albums[index];
+                final selected = album.id == selectedAlbumId;
+                return ListTile(
+                  onTap: () => Navigator.of(context).pop(album),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    side: BorderSide(
+                      color: selected ? AppColors.coral : AppColors.line,
+                    ),
+                  ),
+                  tileColor: selected
+                      ? AppColors.softPink
+                      : AppColors.background,
+                  leading: Icon(
+                    Icons.photo_library_outlined,
+                    color: selected ? AppColors.coral : AppColors.teal,
+                  ),
+                  title: Text(album.name),
+                  subtitle: Text('${album.assetCount} 个项目'),
+                  trailing: selected
+                      ? const Icon(Icons.check_circle, color: AppColors.coral)
+                      : const Icon(Icons.chevron_right),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

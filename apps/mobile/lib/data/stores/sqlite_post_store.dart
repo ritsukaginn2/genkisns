@@ -1,21 +1,25 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../../models.dart';
 import 'post_store.dart';
 
 class SqlitePostStore implements PostStore {
-  SqlitePostStore._(this._database);
+  SqlitePostStore._(this._database, this._documentsDir);
 
   final Database _database;
+  final Directory _documentsDir;
 
   static Future<SqlitePostStore> open() async {
     final databasePath = await getDatabasesPath();
     final path = p.join(databasePath, 'genki_sns_v1.db');
     final database = await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -39,6 +43,8 @@ class SqlitePostStore implements PostStore {
             local_ref TEXT NOT NULL,
             thumbnail_ref TEXT,
             duration_millis INTEGER,
+            width INTEGER,
+            height INTEGER,
             sort_index INTEGER NOT NULL,
             preview_color INTEGER,
             PRIMARY KEY (post_id, id),
@@ -88,9 +94,14 @@ class SqlitePostStore implements PostStore {
             'ALTER TABLE post_images ADD COLUMN duration_millis INTEGER',
           );
         }
+        if (oldVersion < 3) {
+          await db.execute('ALTER TABLE post_images ADD COLUMN width INTEGER');
+          await db.execute('ALTER TABLE post_images ADD COLUMN height INTEGER');
+        }
       },
     );
-    return SqlitePostStore._(database);
+    final documentsDir = await getApplicationDocumentsDirectory();
+    return SqlitePostStore._(database, documentsDir);
   }
 
   @override
@@ -154,6 +165,22 @@ class SqlitePostStore implements PostStore {
   }
 
   @override
+  Future<void> deletePost(String postId) async {
+    await _database.delete('posts', where: 'id = ?', whereArgs: [postId]);
+  }
+
+  @override
+  Future<void> deleteAllPosts() async {
+    // Cascades to images, comments and replies via ON DELETE CASCADE.
+    await _database.delete('posts');
+  }
+
+  @override
+  Future<void> prepareForBackup() async {
+    await _database.rawQuery('PRAGMA wal_checkpoint(FULL)');
+  }
+
+  @override
   Future<void> close() => _database.close();
 
   Future<List<PostImageRef>> _loadImages(String postId) async {
@@ -163,19 +190,25 @@ class SqlitePostStore implements PostStore {
       whereArgs: [postId],
       orderBy: 'sort_index ASC',
     );
-    return [
-      for (final row in rows)
+    final images = <PostImageRef>[];
+    for (final row in rows) {
+      final thumbnailRef = row['thumbnail_ref'] as String?;
+      images.add(
         PostImageRef(
           id: row['id'] as String,
           type: _decodeMediaType(row['type'] as String?),
           source: _decodeImageSource(row['source'] as String),
-          localRef: row['local_ref'] as String,
-          thumbnailRef: row['thumbnail_ref'] as String?,
+          localRef: _resolveMediaPath(row['local_ref'] as String),
+          thumbnailRef: thumbnailRef != null ? _resolveMediaPath(thumbnailRef) : null,
           durationMillis: row['duration_millis'] as int?,
+          width: row['width'] as int?,
+          height: row['height'] as int?,
           sortIndex: row['sort_index'] as int,
           previewColor: _colorFromInt(row['preview_color'] as int?),
         ),
-    ];
+      );
+    }
+    return images;
   }
 
   Future<List<Comment>> _loadComments(String postId) async {
@@ -183,7 +216,7 @@ class SqlitePostStore implements PostStore {
       'comments',
       where: 'post_id = ?',
       whereArgs: [postId],
-      orderBy: 'created_at ASC',
+      orderBy: 'created_at ASC, id ASC',
     );
     final comments = <Comment>[];
     for (final row in rows) {
@@ -217,7 +250,7 @@ class SqlitePostStore implements PostStore {
       'local_replies',
       where: 'post_id = ? AND comment_id = ?',
       whereArgs: [postId, commentId],
-      orderBy: 'created_at ASC',
+      orderBy: 'created_at ASC, id ASC',
     );
     return [
       for (final row in rows)
@@ -255,6 +288,8 @@ class SqlitePostStore implements PostStore {
       'local_ref': image.localRef,
       'thumbnail_ref': image.thumbnailRef,
       'duration_millis': image.durationMillis,
+      'width': image.width,
+      'height': image.height,
       'sort_index': image.sortIndex,
       'preview_color': _colorToInt(image.previewColor),
     };
@@ -311,5 +346,15 @@ class SqlitePostStore implements PostStore {
       (status) => status.name == value,
       orElse: () => InteractionStatus.fallback,
     );
+  }
+
+  String _resolveMediaPath(String storedPath) {
+    // If already absolute (old data or non-path value), return as-is; if relative,
+    // convert to absolute by joining with documentsDir.
+    if (storedPath.startsWith('/') || storedPath.startsWith('preview://')
+        || storedPath.startsWith('camera://') || storedPath.startsWith('album://')) {
+      return storedPath;
+    }
+    return p.join(_documentsDir.path, storedPath);
   }
 }

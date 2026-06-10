@@ -24,8 +24,9 @@ V1 只服务一个核心闭环：
 |----|---------|------|
 | App 数据 | Repository + SQLite 本地数据库 | V1 需要本机持久化，发帖和互动状态不能只存在内存里 |
 | 媒体 | 复制到 App 文档目录，SQLite 保存本地引用 | 首页和详情页需要在重启后继续回显图片或视频 |
+| iCloud 备份 | 复制 SQLite 数据库和媒体目录到 iCloud Drive 容器 | 解决 iOS 卸载重装后的本机数据恢复，不承担实时同步 |
 | LLM 密钥 | V1 不接入真实 LLM 供应商 | 不需要在 App 内保存或展示供应商密钥 |
-| 云端数据 | 不做 | V1 没有账号、同步和多设备需求 |
+| 云端数据 | 不做账号级实时云同步 | V1 没有账号、多设备冲突合并和服务端同步需求 |
 
 正式 App 使用 SQLite 实现 `PostStore`，测试和设计预览可以注入内存实现。所有页面只依赖 Repository/Service 接口，不直接依赖 mock data。
 
@@ -38,7 +39,7 @@ V1 只服务一个核心闭环：
 | `comments` | AI 评论内容、AI 好友快照、评论喜欢数、用户喜欢状态 |
 | `local_replies` | 用户本地二级回复、目标评论、回复对象快照 |
 
-`PostRepository` 每次创建笔记、切换喜欢、回复或删除回复后，都把完整笔记聚合写回 `PostStore`。
+`PostRepository` 每次创建笔记、切换喜欢、回复或删除回复后，都把完整笔记聚合写回 `PostStore`；删除笔记时通过 `PostStore.deletePost()` 删除整条笔记聚合。
 
 ---
 
@@ -49,10 +50,11 @@ V1 只服务一个核心闭环：
 | `UserRepository` | 提供默认用户资料 |
 | `AiFriendRepository` | 提供预设 AI 好友列表 |
 | `PostRepository` | 创建、读取、更新笔记，并把变更写入 `PostStore` |
-| `PostStore` | 定义笔记聚合的本地持久化接口 |
-| `SqlitePostStore` | 保存笔记、图片/视频、评论、喜欢状态和本地回复 |
+| `PostStore` | 定义笔记聚合的本地持久化与删除接口 |
+| `SqlitePostStore` | 保存或删除笔记、图片/视频、评论、喜欢状态和本地回复 |
 | `InteractionService` | 根据笔记内容和 AI 好友人设生成本地模板互动 |
 | `ImagePickerService` | 处理系统相机拍照/拍视频、相册选择、已选媒体回显、本地文件复制和媒体引用生成 |
+| `ICloudBackupService` | iOS 端备份/恢复 SQLite 数据库和本地媒体目录 |
 
 ---
 

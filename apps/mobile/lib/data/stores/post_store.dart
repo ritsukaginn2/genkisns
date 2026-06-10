@@ -5,6 +5,12 @@ abstract class PostStore {
 
   Future<void> upsertPost(Post post);
 
+  Future<void> deletePost(String postId);
+
+  Future<void> deleteAllPosts();
+
+  Future<void> prepareForBackup();
+
   Future<void> close();
 }
 
@@ -27,6 +33,19 @@ class MemoryPostStore implements PostStore {
       _posts[index] = post;
     }
   }
+
+  @override
+  Future<void> deletePost(String postId) async {
+    _posts.removeWhere((post) => post.id == postId);
+  }
+
+  @override
+  Future<void> deleteAllPosts() async {
+    _posts.clear();
+  }
+
+  @override
+  Future<void> prepareForBackup() async {}
 
   @override
   Future<void> close() async {}

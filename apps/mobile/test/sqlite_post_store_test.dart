@@ -38,6 +38,8 @@ void main() {
             localRef: '/tmp/a.mov',
             thumbnailRef: '/tmp/a_thumb.jpg',
             durationMillis: 23000,
+            width: 1920,
+            height: 1080,
             sortIndex: 1,
           ),
         ],
@@ -84,10 +86,61 @@ void main() {
       expect(posts.single.images.last.type, PostMediaType.video);
       expect(posts.single.images.last.thumbnailRef, '/tmp/a_thumb.jpg');
       expect(posts.single.images.last.durationMillis, 23000);
+      expect(posts.single.images.last.width, 1920);
+      expect(posts.single.images.last.height, 1080);
       expect(posts.single.userLiked, isTrue);
       expect(posts.single.interactionStatus, InteractionStatus.fallback);
       expect(posts.single.comments.single.userLiked, isTrue);
       expect(posts.single.comments.single.replies.single.content, '收到。');
     },
   );
+
+  test('deletes posts and cascades stored children', () async {
+    final store = await SqlitePostStore.open();
+    addTearDown(store.close);
+
+    final post = Post(
+      id: 'post_delete',
+      text: '准备删除',
+      images: const [
+        PostImageRef(
+          id: 'image_1',
+          source: PostImageSource.album,
+          localRef: '/tmp/delete.jpg',
+          sortIndex: 0,
+        ),
+      ],
+      createdAt: DateTime(2026, 5, 25, 10),
+      likeCount: 4,
+      comments: [
+        Comment(
+          id: 'comment_1',
+          postId: 'post_delete',
+          actorId: 'friend_mika',
+          actorNameSnapshot: '美香',
+          actorAvatarSnapshot: '美',
+          actorColor: Colors.orange,
+          content: '之后应该一起消失。',
+          createdAt: DateTime(2026, 5, 25, 10, 1),
+          likeCount: 1,
+          replies: [
+            LocalReply(
+              id: 'reply_1',
+              commentId: 'comment_1',
+              authorNameSnapshot: 'Ritsuka',
+              authorAvatarSnapshot: 'R',
+              targetActorNameSnapshot: '美香',
+              content: '会删掉。',
+              createdAt: DateTime(2026, 5, 25, 10, 2),
+            ),
+          ],
+        ),
+      ],
+    );
+
+    await store.upsertPost(post);
+    await store.deletePost(post.id);
+
+    expect(await store.loadPosts(), isEmpty);
+  });
 }

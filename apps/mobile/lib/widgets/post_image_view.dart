@@ -53,31 +53,31 @@ class _ImageCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final file = File(image.localRef);
-    if (!image.localRef.startsWith('preview://') && file.existsSync()) {
+    if (!image.localRef.startsWith('preview://')) {
       return ClipRRect(
         borderRadius: borderRadius,
-        child: Image.file(
-          file,
-          fit: fit,
-          width: double.infinity,
-          height: double.infinity,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return Image.file(
+              File(image.localRef),
+              fit: fit,
+              width: double.infinity,
+              height: double.infinity,
+              gaplessPlayback: true,
+              cacheWidth: _decodeCacheWidth(context, constraints),
+              filterQuality: FilterQuality.low,
+              errorBuilder: (_, _, _) => _MediaPlaceholder(
+                image: image,
+                icon: Icons.image,
+                size: iconSize,
+              ),
+            );
+          },
         ),
       );
     }
 
-    return Container(
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: image.previewColor ?? const Color(0xFFE9D9E1),
-        borderRadius: borderRadius,
-      ),
-      child: Icon(
-        Icons.image,
-        color: Colors.white.withValues(alpha: 0.86),
-        size: iconSize,
-      ),
-    );
+    return _MediaPlaceholder(image: image, icon: Icons.image, size: iconSize);
   }
 }
 
@@ -97,26 +97,34 @@ class _VideoCover extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final thumbnailRef = image.thumbnailRef;
-    final thumbnail = thumbnailRef == null ? null : File(thumbnailRef);
 
     return ClipRRect(
       borderRadius: borderRadius,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (thumbnail != null && thumbnail.existsSync())
-            Image.file(thumbnail, fit: fit)
+          if (thumbnailRef != null)
+            LayoutBuilder(
+              builder: (context, constraints) {
+                return Image.file(
+                  File(thumbnailRef),
+                  fit: fit,
+                  gaplessPlayback: true,
+                  cacheWidth: _decodeCacheWidth(context, constraints),
+                  filterQuality: FilterQuality.low,
+                  errorBuilder: (_, _, _) => _MediaPlaceholder(
+                    image: image,
+                    icon: Icons.videocam_outlined,
+                    size: iconSize,
+                  ),
+                );
+              },
+            )
           else
-            Container(
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: image.previewColor ?? const Color(0xFFE9D9E1),
-              ),
-              child: Icon(
-                Icons.videocam_outlined,
-                color: Colors.white.withValues(alpha: 0.86),
-                size: iconSize,
-              ),
+            _MediaPlaceholder(
+              image: image,
+              icon: Icons.videocam_outlined,
+              size: iconSize,
             ),
           Container(color: Colors.black.withValues(alpha: 0.12)),
           Center(
@@ -157,6 +165,42 @@ class _VideoCover extends StatelessWidget {
       ),
     );
   }
+}
+
+class _MediaPlaceholder extends StatelessWidget {
+  const _MediaPlaceholder({
+    required this.image,
+    required this.icon,
+    required this.size,
+  });
+
+  final PostImageRef image;
+  final IconData icon;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      alignment: Alignment.center,
+      color: image.previewColor ?? const Color(0xFFE9D9E1),
+      child: Icon(
+        icon,
+        color: Colors.white.withValues(alpha: 0.86),
+        size: size,
+      ),
+    );
+  }
+}
+
+/// Decodes file-backed images at roughly their on-screen size instead of full
+/// resolution. A 4000px camera photo shown in a ~180px tile otherwise decodes a
+/// ~48MB bitmap and uploads a huge GPU texture, which janks list scrolling and
+/// starves later animations. Aspect ratio is preserved (only width is hinted).
+int? _decodeCacheWidth(BuildContext context, BoxConstraints constraints) {
+  final width = constraints.maxWidth;
+  if (!width.isFinite || width <= 0) return null;
+  final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+  return (width * devicePixelRatio).ceil();
 }
 
 String _formatDuration(int? durationMillis) {

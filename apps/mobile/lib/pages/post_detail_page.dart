@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/avatar_mark.dart';
+import '../widgets/media_preview_overlay.dart';
 import '../widgets/page_header.dart';
 import '../widgets/post_image_view.dart';
-import 'video_player_page.dart';
 
 class PostDetailPage extends StatefulWidget {
   const PostDetailPage({
@@ -20,6 +20,7 @@ class PostDetailPage extends StatefulWidget {
     this.onToggleCommentLike,
     this.onAddLocalReply,
     this.onDeleteLocalReply,
+    this.onDeletePost,
   });
 
   final Post post;
@@ -35,6 +36,7 @@ class PostDetailPage extends StatefulWidget {
   onAddLocalReply;
   final Future<Post> Function(String postId, String commentId, String replyId)?
   onDeleteLocalReply;
+  final Future<void> Function(String postId)? onDeletePost;
 
   @override
   State<PostDetailPage> createState() => _PostDetailPageState();
@@ -44,6 +46,9 @@ class _PostDetailPageState extends State<PostDetailPage> {
   late Post post;
   String? replyTargetCommentId;
   _PendingReplyDelete? pendingReplyDelete;
+  int? previewMediaIndex;
+  bool showPostActions = false;
+  bool pendingPostDelete = false;
 
   @override
   void initState() {
@@ -78,7 +83,14 @@ class _PostDetailPageState extends State<PostDetailPage> {
                 bottom: replyTarget == null ? AppSpacing.xl : 196,
               ),
               children: [
-                const PageHeader(title: '笔记详情'),
+                PageHeader(
+                  title: '笔记详情',
+                  trailing: IconButton(
+                    tooltip: '更多操作',
+                    onPressed: _openPostActions,
+                    icon: const Icon(Icons.more_horiz),
+                  ),
+                ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.lg,
@@ -94,7 +106,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
                       if (post.images.isNotEmpty) ...[
                         _ImageGrid(
                           images: post.images,
-                          onOpenVideo: _openVideo,
+                          onOpenMedia: _openMediaPreview,
+                          previewOpen: previewMediaIndex != null,
                         ),
                         const SizedBox(height: AppSpacing.lg),
                       ],
@@ -209,6 +222,45 @@ class _PostDetailPageState extends State<PostDetailPage> {
                 ),
               ),
             ],
+            if (showPostActions) ...[
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: _closePostActions,
+                  child: Container(color: Colors.black.withValues(alpha: 0.12)),
+                ),
+              ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: _PostActionsSheet(
+                  onCancel: _closePostActions,
+                  onDelete: _openDeletePostConfirm,
+                ),
+              ),
+            ],
+            if (pendingPostDelete) ...[
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: _closeDeletePostConfirm,
+                  child: Container(color: Colors.black.withValues(alpha: 0.12)),
+                ),
+              ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: _DeletePostConfirmSheet(
+                  post: post,
+                  onCancel: _closeDeletePostConfirm,
+                  onDelete: _deleteCurrentPost,
+                ),
+              ),
+            ],
+            if (previewMediaIndex != null)
+              Positioned.fill(
+                child: MediaPreviewOverlay(
+                  media: post.images,
+                  initialIndex: previewMediaIndex!,
+                  onClose: _closeMediaPreview,
+                ),
+              ),
           ],
         ),
       ),
@@ -233,14 +285,59 @@ class _PostDetailPageState extends State<PostDetailPage> {
     _openCommentReply(post.comments.first.id);
   }
 
-  void _openVideo(PostImageRef video) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => VideoPlayerPage(video: video)),
-    );
+  void _openMediaPreview(int index) {
+    setState(() {
+      replyTargetCommentId = null;
+      pendingReplyDelete = null;
+      showPostActions = false;
+      pendingPostDelete = false;
+      previewMediaIndex = index;
+    });
+  }
+
+  void _closeMediaPreview() {
+    setState(() => previewMediaIndex = null);
   }
 
   void _openCommentReply(String commentId) {
-    setState(() => replyTargetCommentId = commentId);
+    setState(() {
+      replyTargetCommentId = commentId;
+      showPostActions = false;
+      pendingPostDelete = false;
+    });
+  }
+
+  void _openPostActions() {
+    setState(() {
+      replyTargetCommentId = null;
+      pendingReplyDelete = null;
+      pendingPostDelete = false;
+      showPostActions = true;
+    });
+  }
+
+  void _closePostActions() {
+    setState(() => showPostActions = false);
+  }
+
+  void _openDeletePostConfirm() {
+    setState(() {
+      showPostActions = false;
+      pendingPostDelete = true;
+    });
+  }
+
+  void _closeDeletePostConfirm() {
+    setState(() => pendingPostDelete = false);
+  }
+
+  Future<void> _deleteCurrentPost() async {
+    final callback = widget.onDeletePost;
+    if (callback != null) {
+      await callback(post.id);
+    }
+    if (!mounted) return;
+    Navigator.of(context).pop();
   }
 
   Future<void> _togglePostLike() async {
@@ -490,25 +587,50 @@ class _AuthorHeader extends StatelessWidget {
 }
 
 class _ImageGrid extends StatelessWidget {
-  const _ImageGrid({required this.images, required this.onOpenVideo});
+  const _ImageGrid({
+    required this.images,
+    required this.onOpenMedia,
+    required this.previewOpen,
+  });
 
   final List<PostImageRef> images;
-  final ValueChanged<PostImageRef> onOpenVideo;
+  final ValueChanged<int> onOpenMedia;
+
+  /// Whether the fullscreen preview is open. The inline video pauses while it is
+  /// so the two players never play audio at the same time.
+  final bool previewOpen;
 
   @override
   Widget build(BuildContext context) {
-    if (images.length == 1 && images.single.isVideo) {
-      final video = images.single;
-      return AspectRatio(
-        aspectRatio: 16 / 9,
+    if (images.length == 1) {
+      final media = images.single;
+      if (media.isVideo) {
+        // Auto-play the video right inside the post frame (Xiaohongshu-style),
+        // with a mute toggle. Tapping opens the fullscreen player.
+        return ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 520),
+          child: VideoSurface(
+            media: media,
+            active: !previewOpen,
+            initiallyMuted: true,
+            borderRadius: BorderRadius.circular(18),
+            onTap: () => onOpenMedia(0),
+          ),
+        );
+      }
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 520),
         child: Semantics(
           button: true,
-          label: '播放视频',
+          label: '预览图片',
           child: GestureDetector(
-            onTap: () => onOpenVideo(video),
-            child: PostImageView(
-              image: video,
-              borderRadius: BorderRadius.circular(18),
+            onTap: () => onOpenMedia(0),
+            child: AspectRatio(
+              aspectRatio: media.aspectRatio.clamp(0.72, 1.78),
+              child: PostImageView(
+                image: media,
+                borderRadius: BorderRadius.circular(18),
+              ),
             ),
           ),
         ),
@@ -527,10 +649,10 @@ class _ImageGrid extends StatelessWidget {
       itemBuilder: (context, index) {
         final image = images[index];
         return Semantics(
-          button: image.isVideo,
-          label: image.isVideo ? '播放视频' : null,
+          button: true,
+          label: image.isVideo ? '预览视频' : '预览图片',
           child: GestureDetector(
-            onTap: image.isVideo ? () => onOpenVideo(image) : null,
+            onTap: () => onOpenMedia(index),
             child: PostImageView(
               image: image,
               borderRadius: BorderRadius.circular(16),
@@ -869,6 +991,176 @@ class _DeleteReplyConfirmSheet extends StatelessWidget {
             child: OutlinedButton(onPressed: onCancel, child: const Text('取消')),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PostActionsSheet extends StatelessWidget {
+  const _PostActionsSheet({required this.onCancel, required this.onDelete});
+
+  final VoidCallback onCancel;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.lg + MediaQuery.of(context).padding.bottom,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.14),
+            blurRadius: 26,
+            offset: const Offset(0, -8),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _SheetActionButton(
+            icon: Icons.delete_outline,
+            label: '删除笔记',
+            color: AppColors.coral,
+            onTap: onDelete,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(onPressed: onCancel, child: const Text('取消')),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DeletePostConfirmSheet extends StatelessWidget {
+  const _DeletePostConfirmSheet({
+    required this.post,
+    required this.onCancel,
+    required this.onDelete,
+  });
+
+  final Post post;
+  final VoidCallback onCancel;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = post.text.trim().isEmpty ? '这篇媒体笔记' : post.text.trim();
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.lg,
+        AppSpacing.lg,
+        AppSpacing.lg + MediaQuery.of(context).padding.bottom,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.14),
+            blurRadius: 26,
+            offset: const Offset(0, -8),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('删除这篇笔记？', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            '删除后不可恢复。',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: AppColors.muted),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            summary,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: AppColors.muted),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline, size: 18),
+              label: const Text('删除笔记'),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(onPressed: onCancel, child: const Text('取消')),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SheetActionButton extends StatelessWidget {
+  const _SheetActionButton({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.md,
+          ),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: color.withValues(alpha: 0.22)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: color, size: 20),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                label,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(color: color),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

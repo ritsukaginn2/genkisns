@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import '../../models.dart';
 import '../services/interaction_service.dart';
 import '../stores/post_store.dart';
@@ -20,6 +22,8 @@ class PostRepository {
   }
 
   Future<void> close() => store.close();
+
+  Future<void> prepareForBackup() => store.prepareForBackup();
 
   Post getPost(String postId) {
     final index = _postIndex(postId);
@@ -150,6 +154,24 @@ class PostRepository {
     return _replacePost(post.copyWith(comments: updatedComments));
   }
 
+  Future<void> deletePost(String postId) async {
+    final index = _postIndex(postId);
+    final post = _posts.removeAt(index);
+    await store.deletePost(postId);
+    await _deletePostMedia(post);
+  }
+
+  /// Removes every post and its media from the local store. Does not touch any
+  /// iCloud backup.
+  Future<void> clearAllPosts() async {
+    final removed = List<Post>.from(_posts);
+    _posts.clear();
+    await store.deleteAllPosts();
+    for (final post in removed) {
+      await _deletePostMedia(post);
+    }
+  }
+
   Comment _toggleCommentLikeState(Comment comment) {
     final nextLiked = !comment.userLiked;
     final nextLikeCount = nextLiked
@@ -172,5 +194,31 @@ class PostRepository {
       throw StateError('Post not found: $postId');
     }
     return index;
+  }
+
+  Future<void> _deletePostMedia(Post post) async {
+    for (final image in post.images) {
+      await _deleteFileRef(image.localRef);
+      final thumbnailRef = image.thumbnailRef;
+      if (thumbnailRef != null) {
+        await _deleteFileRef(thumbnailRef);
+      }
+    }
+  }
+
+  Future<void> _deleteFileRef(String ref) async {
+    if (ref.startsWith('preview://') ||
+        ref.startsWith('camera://') ||
+        ref.startsWith('album://')) {
+      return;
+    }
+    final file = File(ref);
+    try {
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } on FileSystemException {
+      // A post delete should not be blocked by best-effort media cleanup.
+    }
   }
 }

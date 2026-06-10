@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -5,6 +7,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'data/repositories/ai_friend_repository.dart';
 import 'data/repositories/post_repository.dart';
 import 'data/repositories/user_repository.dart';
+import 'data/services/icloud_backup_service.dart';
 import 'data/services/interaction_service.dart';
 import 'data/stores/post_store.dart';
 import 'data/stores/sqlite_post_store.dart';
@@ -15,6 +18,7 @@ import 'pages/create_post_page.dart';
 import 'pages/design_directions_page.dart';
 import 'pages/friends_page.dart';
 import 'pages/home_page.dart';
+import 'pages/icloud_backup_page.dart';
 import 'pages/post_detail_page.dart';
 import 'pages/profile_page.dart';
 import 'theme/app_theme.dart';
@@ -37,7 +41,9 @@ class GenkiSnsApp extends StatefulWidget {
 class _GenkiSnsAppState extends State<GenkiSnsApp> {
   late final UserRepository userRepository;
   late final AiFriendRepository aiFriendRepository;
+  final iCloudBackupService = const ICloudBackupService();
   PostRepository? postRepository;
+  Timer? iCloudBackupDebounce;
   Object? loadError;
 
   @override
@@ -50,12 +56,16 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
 
   @override
   void dispose() {
+    iCloudBackupDebounce?.cancel();
     postRepository?.close();
     super.dispose();
   }
 
   Future<void> _initializeDataLayer() async {
     try {
+      if (!kIsWeb && widget.postStoreFactory == null) {
+        await iCloudBackupService.restoreIfLocalDataMissing();
+      }
       final storeFactory = widget.postStoreFactory ?? _defaultPostStoreFactory;
       final store = await storeFactory();
       final repository = PostRepository(
@@ -94,6 +104,10 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
                 onToggleCommentLike: _toggleCommentLike,
                 onAddLocalReply: _addLocalReply,
                 onDeleteLocalReply: _deleteLocalReply,
+                onDeletePost: _deletePost,
+                onLoadICloudBackupStatus: iCloudBackupService.status,
+                onSetICloudSyncEnabled: _setICloudSyncEnabled,
+                onClearLocalContent: _clearLocalContent,
               ));
 
     return MaterialApp(
@@ -122,12 +136,14 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
       friends: selectedFriends,
     );
     setState(() {});
+    _scheduleICloudBackup();
     return post;
   }
 
   Future<Post> _togglePostLike(String postId) async {
     final post = await postRepository!.togglePostLike(postId);
     setState(() {});
+    _scheduleICloudBackup();
     return post;
   }
 
@@ -137,6 +153,7 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
       commentId: commentId,
     );
     setState(() {});
+    _scheduleICloudBackup();
     return post;
   }
 
@@ -152,6 +169,7 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
       content: content,
     );
     setState(() {});
+    _scheduleICloudBackup();
     return post;
   }
 
@@ -166,7 +184,88 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
       replyId: replyId,
     );
     setState(() {});
+    _scheduleICloudBackup();
     return post;
+  }
+
+  Future<void> _deletePost(String postId) async {
+    await postRepository!.deletePost(postId);
+    setState(() {});
+    _scheduleICloudBackup();
+  }
+
+  Future<void> _clearLocalContent() async {
+    // Cancel any pending auto-backup so it can't run mid-clear, and leave the
+    // iCloud backup untouched — this wipes local content only.
+    iCloudBackupDebounce?.cancel();
+    await postRepository?.clearAllPosts();
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  Future<ICloudBackupStatus> _setICloudSyncEnabled(bool enabled) async {
+    iCloudBackupDebounce?.cancel();
+    await iCloudBackupService.setSyncEnabled(enabled);
+    if (!enabled) {
+      return iCloudBackupService.status();
+    }
+
+    // Direction-aware turn-on: if this device has nothing yet but the cloud
+    // does, pull it down instead of overwriting the cloud backup with an empty
+    // state. Otherwise push the current local state up.
+    final localEmpty = postRepository?.listPosts().isEmpty ?? true;
+    final cloudStatus = await iCloudBackupService.status();
+    if (localEmpty && cloudStatus.available && cloudStatus.hasBackup) {
+      return _restoreFromICloud();
+    }
+
+    try {
+      await postRepository?.prepareForBackup();
+      await iCloudBackupService.backupNow();
+    } on Object {
+      // Surface availability via status() below rather than throwing.
+    }
+    return iCloudBackupService.status();
+  }
+
+  Future<ICloudBackupStatus> _restoreFromICloud() async {
+    iCloudBackupDebounce?.cancel();
+    await postRepository?.close();
+    if (mounted) {
+      setState(() {
+        postRepository = null;
+        loadError = null;
+      });
+    }
+    try {
+      final status = await iCloudBackupService.restoreNow();
+      if (!mounted) return status;
+      await _initializeDataLayer();
+      return status;
+    } catch (_) {
+      if (mounted) {
+        await _initializeDataLayer();
+      }
+      rethrow;
+    }
+  }
+
+  void _scheduleICloudBackup() {
+    if (kIsWeb || widget.postStoreFactory != null) return;
+    iCloudBackupDebounce?.cancel();
+    iCloudBackupDebounce = Timer(const Duration(milliseconds: 900), () {
+      unawaited(_runAutomaticICloudBackup());
+    });
+  }
+
+  Future<void> _runAutomaticICloudBackup() async {
+    try {
+      if (!await iCloudBackupService.isSyncEnabled()) return;
+      await postRepository?.prepareForBackup();
+      await iCloudBackupService.backupNow();
+    } on Object {
+      // Automatic backup must not interrupt the primary local-only flow.
+    }
   }
 }
 
@@ -212,6 +311,10 @@ class GenkiShell extends StatefulWidget {
     required this.onToggleCommentLike,
     required this.onAddLocalReply,
     required this.onDeleteLocalReply,
+    required this.onDeletePost,
+    required this.onLoadICloudBackupStatus,
+    required this.onSetICloudSyncEnabled,
+    required this.onClearLocalContent,
   });
 
   final UserProfile user;
@@ -225,6 +328,10 @@ class GenkiShell extends StatefulWidget {
   onAddLocalReply;
   final Future<Post> Function(String postId, String commentId, String replyId)
   onDeleteLocalReply;
+  final Future<void> Function(String postId) onDeletePost;
+  final Future<ICloudBackupStatus> Function() onLoadICloudBackupStatus;
+  final Future<ICloudBackupStatus> Function(bool enabled) onSetICloudSyncEnabled;
+  final Future<void> Function() onClearLocalContent;
 
   @override
   State<GenkiShell> createState() => _GenkiShellState();
@@ -268,6 +375,7 @@ class _GenkiShellState extends State<GenkiShell> {
           onToggleCommentLike: widget.onToggleCommentLike,
           onAddLocalReply: widget.onAddLocalReply,
           onDeleteLocalReply: widget.onDeleteLocalReply,
+          onDeletePost: widget.onDeletePost,
         ),
       ),
     );
@@ -283,6 +391,8 @@ class _GenkiShellState extends State<GenkiShell> {
           onOpenAbout: _openAbout,
           onOpenUiLab: _openUiLab,
           onOpenFriends: _openFriends,
+          onOpenICloudBackup: _openICloudBackup,
+          onClearLocalContent: widget.onClearLocalContent,
         ),
       ),
     );
@@ -306,6 +416,17 @@ class _GenkiShellState extends State<GenkiShell> {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => FriendsPage(friends: widget.friends),
+      ),
+    );
+  }
+
+  void _openICloudBackup() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ICloudBackupPage(
+          loadStatus: widget.onLoadICloudBackupStatus,
+          onSetSyncEnabled: widget.onSetICloudSyncEnabled,
+        ),
       ),
     );
   }

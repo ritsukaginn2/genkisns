@@ -14,6 +14,8 @@ class ProfilePage extends StatelessWidget {
     required this.onOpenAbout,
     required this.onOpenUiLab,
     required this.onOpenFriends,
+    required this.onOpenICloudBackup,
+    required this.onClearLocalContent,
   });
 
   final UserProfile user;
@@ -22,6 +24,8 @@ class ProfilePage extends StatelessWidget {
   final VoidCallback onOpenAbout;
   final VoidCallback onOpenUiLab;
   final VoidCallback onOpenFriends;
+  final VoidCallback onOpenICloudBackup;
+  final Future<void> Function() onClearLocalContent;
 
   @override
   Widget build(BuildContext context) {
@@ -75,11 +79,109 @@ class ProfilePage extends StatelessWidget {
                     subtitle: 'AI 生成说明与隐私提示',
                     onTap: onOpenAbout,
                   ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _SettingsTile(
+                    icon: Icons.cloud_queue,
+                    iconColor: AppColors.coral,
+                    title: 'iCloud 同步',
+                    subtitle: '自动备份本机笔记与媒体',
+                    onTap: onOpenICloudBackup,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _SettingsTile(
+                    icon: Icons.delete_sweep_outlined,
+                    iconColor: AppColors.coral,
+                    title: '清空本地内容',
+                    subtitle: '删除本机所有笔记和媒体（不影响 iCloud 备份）',
+                    onTap: () => _confirmClear(context),
+                  ),
                 ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _confirmClear(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => _ClearConfirmSheet(
+        postCount: postCount,
+        onCancel: () => Navigator.of(sheetContext).pop(false),
+        onConfirm: () => Navigator.of(sheetContext).pop(true),
+      ),
+    );
+    if (confirmed != true) return;
+
+    await onClearLocalContent();
+    messenger.showSnackBar(const SnackBar(content: Text('已清空本地内容')));
+  }
+}
+
+class _ClearConfirmSheet extends StatelessWidget {
+  const _ClearConfirmSheet({
+    required this.postCount,
+    required this.onCancel,
+    required this.onConfirm,
+  });
+
+  final int postCount;
+  final VoidCallback onCancel;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.lg,
+        AppSpacing.lg,
+        AppSpacing.lg + MediaQuery.of(context).padding.bottom,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.14),
+            blurRadius: 26,
+            offset: const Offset(0, -8),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('清空本地内容？', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            postCount > 0
+                ? '将删除本机 $postCount 篇笔记及其媒体，删除后不可恢复。iCloud 备份不受影响。'
+                : '将删除本机所有笔记及其媒体，删除后不可恢复。iCloud 备份不受影响。',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: AppColors.muted),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: onConfirm,
+              icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+              label: const Text('清空'),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(onPressed: onCancel, child: const Text('取消')),
+          ),
+        ],
       ),
     );
   }

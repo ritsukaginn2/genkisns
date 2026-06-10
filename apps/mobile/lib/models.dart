@@ -132,6 +132,8 @@ class PostImageRef {
     this.type = PostMediaType.image,
     this.thumbnailRef,
     this.durationMillis,
+    this.width,
+    this.height,
     this.previewColor,
   });
 
@@ -141,10 +143,24 @@ class PostImageRef {
   final String localRef;
   final String? thumbnailRef;
   final int? durationMillis;
+  final int? width;
+  final int? height;
   final int sortIndex;
   final Color? previewColor;
 
   bool get isVideo => type == PostMediaType.video;
+
+  double get aspectRatio {
+    final safeWidth = width;
+    final safeHeight = height;
+    if (safeWidth == null ||
+        safeHeight == null ||
+        safeWidth <= 0 ||
+        safeHeight <= 0) {
+      return isVideo ? 16 / 9 : 1;
+    }
+    return safeWidth / safeHeight;
+  }
 
   static List<PostImageRef> previewColors(List<Color> colors) {
     return [

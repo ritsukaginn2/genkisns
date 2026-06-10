@@ -19,6 +19,7 @@ apps/mobile/
       services/
         interaction_service.dart  ← AI 互动生成入口与 fallback
         image_picker_service.dart ← 系统相机拍照/拍视频、App 内相册选择、文件复制和本地引用生成
+        icloud_backup_service.dart ← iOS iCloud 备份/恢复本机数据库和媒体目录
       stores/
         post_store.dart           ← 笔记本地持久化接口与内存测试实现
         sqlite_post_store.dart    ← SQLite 本机持久化实现
@@ -30,8 +31,9 @@ apps/mobile/
     pages/
       home_page.dart              ← 首页（瀑布流 / 空状态）
       create_post_page.dart       ← 发布笔记（媒体来源 / 相册选择 / 已选回显 / 满图 / 单视频）
-      post_detail_page.dart       ← 笔记详情（视频播放 / 喜欢 / 评论喜欢 / 回复 / 删除回复）
+      post_detail_page.dart       ← 笔记详情（视频播放 / 喜欢 / 评论喜欢 / 回复 / 删除回复 / 删除笔记）
       profile_page.dart           ← 我的
+      icloud_backup_page.dart     ← iCloud 备份/恢复
       friends_page.dart           ← AI 好友列表
       about_page.dart             ← 关于
       design_directions_page.dart ← UI 实验室（A/B/C，从「我的」隐藏入口进入）
@@ -147,8 +149,9 @@ V1 不使用底部 Tab。
 - 再次打开相册选择层时，已添加的相册图片保持勾选；确认后以当前勾选集合同步发布页图片。
 - V1 不支持图片和视频混排；视频与图片互斥。
 - 发布成功后不弹出“AI 将会评论”的提示，直接回首页。
-- 笔记详情支持帖子喜欢、评论喜欢、回复评论。
+- 笔记详情支持帖子喜欢、评论喜欢、回复评论和删除笔记。
 - 自己发送的本地回复可以删除，删除前出现确认层。
+- 删除笔记入口在详情页右上角更多操作中，删除前出现确认层，删除后返回首页。
 
 ### Phase 3c 正式 Mock App 验收路径
 
@@ -213,6 +216,9 @@ V1 不使用底部 Tab。
 ### Phase 5 本地数据层
 
 - 正式 App 启动时打开 SQLite `genki_sns_v1.db` 并加载本机笔记。
-- 发布笔记、帖子喜欢、评论喜欢、本地回复和删除回复都写回 SQLite。
+- 发布笔记、帖子喜欢、评论喜欢、本地回复、删除回复和删除笔记都写回 SQLite。
 - 系统相机和相册媒体会复制到 App 文档目录，数据库保存 `localRef`；视频额外保存 `thumbnailRef` 和 `durationMillis`。
+- iOS 端变更后自动排队备份 SQLite 数据库和 `post_media/` 到 iCloud Drive 容器。
+- iOS 端启动时如果本机数据库不存在，会尝试从 iCloud 备份恢复。
+- iCloud 备份只解决卸载重装后的本机数据恢复，不处理多设备实时同步和冲突合并。
 - 测试和设计预览可注入 `MemoryPostStore`，不影响正式 App 路径。

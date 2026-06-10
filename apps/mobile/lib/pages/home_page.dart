@@ -288,6 +288,7 @@ class _PostColumn extends StatelessWidget {
       children: [
         for (var i = 0; i < posts.length; i++) ...[
           _PostTile(
+            key: ValueKey(posts[i].id),
             user: user,
             post: posts[i],
             imageHeight: (i.isEven == startTall) ? 178 : 124,
@@ -302,6 +303,7 @@ class _PostColumn extends StatelessWidget {
 
 class _PostTile extends StatelessWidget {
   const _PostTile({
+    super.key,
     required this.user,
     required this.post,
     required this.imageHeight,

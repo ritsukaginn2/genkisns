@@ -9,6 +9,7 @@ class PageHeader extends StatelessWidget {
     this.titleStyle,
     this.showBackButton = true,
     this.foregroundColor,
+    this.trailing,
     this.padding = const EdgeInsets.fromLTRB(
       AppSpacing.lg,
       AppSpacing.md,
@@ -21,6 +22,7 @@ class PageHeader extends StatelessWidget {
   final TextStyle? titleStyle;
   final bool showBackButton;
   final Color? foregroundColor;
+  final Widget? trailing;
   final EdgeInsetsGeometry padding;
 
   @override
@@ -45,6 +47,7 @@ class PageHeader extends StatelessWidget {
                   ?.copyWith(color: foregroundColor),
             ),
           ),
+          ?trailing,
         ],
       ),
     );

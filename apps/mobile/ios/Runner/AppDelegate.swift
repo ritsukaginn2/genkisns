@@ -1,4 +1,5 @@
 import Flutter
+import AVFoundation
 import UIKit
 
 @main
@@ -24,6 +25,104 @@ import UIKit
         return
       }
       self?.cameraCapture.capture(result: result)
+    }
+
+    let iCloudChannel = FlutterMethodChannel(
+      name: "genki_sns/icloud",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    iCloudChannel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "containerPath":
+        guard let url = FileManager.default.url(forUbiquityContainerIdentifier: nil) else {
+          result(FlutterError(code: "icloud_unavailable", message: "iCloud container is unavailable.", details: nil))
+          return
+        }
+        result(url.path)
+      case "downloadBackup":
+        let timeoutMillis = (call.arguments as? [String: Any])?["timeoutMillis"] as? Int ?? 20000
+        ICloudBackupDownloader.download(timeoutMillis: timeoutMillis, result: result)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+}
+
+/// iCloud Drive stores files lazily: after a reinstall (or once a file is
+/// evicted) the backup exists in the cloud but only a placeholder is on disk, so
+/// Dart's `File.exists()` returns false until the real contents are pulled down.
+/// This forces the backup's gating files (and media) to download before Dart
+/// reads them.
+enum ICloudBackupDownloader {
+  static func download(timeoutMillis: Int, result: @escaping FlutterResult) {
+    guard let container = FileManager.default.url(forUbiquityContainerIdentifier: nil) else {
+      result(false)
+      return
+    }
+    let backupRoot = container
+      .appendingPathComponent("Documents", isDirectory: true)
+      .appendingPathComponent("GenkiSNS", isDirectory: true)
+      .appendingPathComponent("V1Backup", isDirectory: true)
+
+    DispatchQueue.global(qos: .userInitiated).async {
+      let fm = FileManager.default
+
+      // The marker + database files gate whether a backup is considered valid,
+      // so target them by their known logical paths (enumeration can surface
+      // ".icloud" placeholders instead).
+      let databaseDir = backupRoot.appendingPathComponent("database", isDirectory: true)
+      let gatingFiles = [
+        backupRoot.appendingPathComponent("backup.marker"),
+        databaseDir.appendingPathComponent("genki_sns_v1.db"),
+        databaseDir.appendingPathComponent("genki_sns_v1.db-wal"),
+        databaseDir.appendingPathComponent("genki_sns_v1.db-shm"),
+        databaseDir.appendingPathComponent("genki_sns_v1.db-journal"),
+      ]
+      let mediaDir = backupRoot.appendingPathComponent("post_media", isDirectory: true)
+
+      func startDownloads() {
+        for url in gatingFiles {
+          try? fm.startDownloadingUbiquitousItem(at: url)
+        }
+        if let enumerator = fm.enumerator(at: mediaDir, includingPropertiesForKeys: nil) {
+          for case let url as URL in enumerator {
+            try? fm.startDownloadingUbiquitousItem(at: url)
+          }
+        }
+      }
+
+      func isPending(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey]),
+              let status = values.ubiquitousItemDownloadingStatus else {
+          // Item is not in iCloud (e.g. does not exist yet) — nothing to wait on.
+          return false
+        }
+        return status != .current
+      }
+
+      func hasPending() -> Bool {
+        for url in gatingFiles where isPending(url) {
+          return true
+        }
+        if let enumerator = fm.enumerator(at: mediaDir, includingPropertiesForKeys: [.ubiquitousItemDownloadingStatusKey, .isDirectoryKey]) {
+          for case let url as URL in enumerator {
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
+            if values?.isDirectory == true { continue }
+            if isPending(url) { return true }
+          }
+        }
+        return false
+      }
+
+      let deadline = Date().addingTimeInterval(Double(timeoutMillis) / 1000.0)
+      startDownloads()
+      while Date() < deadline {
+        if !hasPending() { break }
+        startDownloads()
+        Thread.sleep(forTimeInterval: 0.4)
+      }
+      DispatchQueue.main.async { result(true) }
     }
   }
 }
@@ -97,7 +196,12 @@ final class NativeCameraCapture: NSObject, UINavigationControllerDelegate, UIIma
       .appendingPathExtension("jpg")
     do {
       try data.write(to: target, options: [.atomic])
-      return ["type": "image", "path": target.path]
+      return [
+        "type": "image",
+        "path": target.path,
+        "width": Int(image.size.width),
+        "height": Int(image.size.height)
+      ]
     } catch {
       return FlutterError(code: "image_write_failed", message: error.localizedDescription, details: nil)
     }
@@ -112,7 +216,15 @@ final class NativeCameraCapture: NSObject, UINavigationControllerDelegate, UIIma
         try FileManager.default.removeItem(at: target)
       }
       try FileManager.default.copyItem(at: source, to: target)
-      return ["type": "video", "path": target.path]
+      let asset = AVAsset(url: target)
+      let track = asset.tracks(withMediaType: .video).first
+      let naturalSize = track?.naturalSize.applying(track?.preferredTransform ?? .identity) ?? .zero
+      return [
+        "type": "video",
+        "path": target.path,
+        "width": Int(abs(naturalSize.width)),
+        "height": Int(abs(naturalSize.height))
+      ]
     } catch {
       return FlutterError(code: "video_copy_failed", message: error.localizedDescription, details: nil)
     }

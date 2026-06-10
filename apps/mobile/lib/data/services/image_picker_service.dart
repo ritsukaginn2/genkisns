@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,10 +15,32 @@ enum DeviceAlbumLoadStatus { ready, denied, empty }
 
 @immutable
 class DeviceAlbumLoadResult {
-  const DeviceAlbumLoadResult({required this.status, this.options = const []});
+  const DeviceAlbumLoadResult({
+    required this.status,
+    this.albums = const [],
+    this.options = const [],
+    this.hasMore = false,
+  });
 
   final DeviceAlbumLoadStatus status;
+  final List<DeviceAlbumPathOption> albums;
   final List<DeviceAlbumImageOption> options;
+  final bool hasMore;
+}
+
+@immutable
+class DeviceAlbumPathOption {
+  const DeviceAlbumPathOption({
+    required this.id,
+    required this.name,
+    required this.assetCount,
+    required this.path,
+  });
+
+  final String id;
+  final String name;
+  final int assetCount;
+  final AssetPathEntity path;
 }
 
 @immutable
@@ -28,6 +51,8 @@ class DeviceAlbumImageOption {
     required this.thumbnailBytes,
     required this.asset,
     this.durationMillis,
+    this.width,
+    this.height,
   });
 
   final String assetId;
@@ -35,6 +60,8 @@ class DeviceAlbumImageOption {
   final Uint8List thumbnailBytes;
   final AssetEntity asset;
   final int? durationMillis;
+  final int? width;
+  final int? height;
 
   bool get isVideo => type == PostMediaType.video;
 }
@@ -63,6 +90,8 @@ class PickedImageDraft {
     required this.localRef,
     this.thumbnailRef,
     this.durationMillis,
+    this.width,
+    this.height,
     this.assetId,
   });
 
@@ -74,6 +103,8 @@ class PickedImageDraft {
   final String localRef;
   final String? thumbnailRef;
   final int? durationMillis;
+  final int? width;
+  final int? height;
   final String? assetId;
 
   PostImageRef toPostImageRef({required int sortIndex}) {
@@ -84,6 +115,8 @@ class PickedImageDraft {
       localRef: localRef,
       thumbnailRef: thumbnailRef,
       durationMillis: durationMillis,
+      width: width,
+      height: height,
       sortIndex: sortIndex,
       previewColor: previewColor,
     );
@@ -153,6 +186,8 @@ class ImagePickerService {
       source: PostImageSource.camera,
       localRef: 'camera://video/$id',
       durationMillis: 18 * 1000,
+      width: 16,
+      height: 9,
     );
   }
 
@@ -191,6 +226,8 @@ class ImagePickerService {
           source: PostImageSource.camera,
           id: id,
         ),
+        width: await _imageWidth(picked.path),
+        height: await _imageHeight(picked.path),
       ),
     ];
   }
@@ -212,6 +249,8 @@ class ImagePickerService {
         source: PostImageSource.camera,
         localRef: localRef,
         thumbnailRef: await _generateVideoThumbnail(localRef),
+        width: 16,
+        height: 9,
       ),
     ];
   }
@@ -245,6 +284,8 @@ class ImagePickerService {
           thumbnailRef: type == PostMediaType.video
               ? await _generateVideoThumbnail(localRef)
               : null,
+          width: result['width'] as int?,
+          height: result['height'] as int?,
         ),
       ];
     } on MissingPluginException {
@@ -279,6 +320,8 @@ class ImagePickerService {
             source: PostImageSource.album,
             id: id,
           ),
+          width: await _imageWidth(pickedFiles[index].path),
+          height: await _imageHeight(pickedFiles[index].path),
         ),
       );
     }
@@ -286,7 +329,10 @@ class ImagePickerService {
   }
 
   Future<DeviceAlbumLoadResult> listDeviceAlbumOptions({
-    int limit = 120,
+    AssetPathEntity? path,
+    int page = 0,
+    int pageSize = 60,
+    bool includeAlbums = true,
   }) async {
     final permission = await PhotoManager.requestPermissionExtend(
       requestOption: const PermissionRequestOption(
@@ -301,14 +347,23 @@ class ImagePickerService {
     }
 
     final paths = await PhotoManager.getAssetPathList(
-      onlyAll: true,
+      onlyAll: false,
       type: RequestType.common,
     );
     if (paths.isEmpty) {
       return const DeviceAlbumLoadResult(status: DeviceAlbumLoadStatus.empty);
     }
 
-    final assets = await paths.first.getAssetListPaged(page: 0, size: limit);
+    final albumOptions = includeAlbums
+        ? await _buildAlbumOptions(paths)
+        : const <DeviceAlbumPathOption>[];
+
+    final activePath = path ?? paths.first;
+    final assetCount = await activePath.assetCountAsync;
+    final assets = await activePath.getAssetListPaged(
+      page: page,
+      size: pageSize,
+    );
     final options = <DeviceAlbumImageOption>[];
     for (final asset in assets) {
       final type = switch (asset.type) {
@@ -332,6 +387,8 @@ class ImagePickerService {
           durationMillis: type == PostMediaType.video
               ? asset.videoDuration.inMilliseconds
               : null,
+          width: asset.width,
+          height: asset.height,
         ),
       );
     }
@@ -340,7 +397,9 @@ class ImagePickerService {
       status: options.isEmpty
           ? DeviceAlbumLoadStatus.empty
           : DeviceAlbumLoadStatus.ready,
+      albums: List.unmodifiable(albumOptions),
       options: List.unmodifiable(options),
+      hasMore: (page + 1) * pageSize < assetCount,
     );
   }
 
@@ -365,8 +424,33 @@ class ImagePickerService {
           ? await _persistThumbnailBytes(option.thumbnailBytes, id: id)
           : null,
       durationMillis: option.durationMillis,
+      width: option.width,
+      height: option.height,
       assetId: option.assetId,
     );
+  }
+
+  /// Resolves the on-disk file for an album option so it can be previewed
+  /// (zoomed / played) without first copying it into the post media directory.
+  Future<File?> resolvePreviewFile(DeviceAlbumImageOption option) async {
+    return await option.asset.file ?? await option.asset.originFile;
+  }
+
+  Future<List<DeviceAlbumPathOption>> _buildAlbumOptions(
+    List<AssetPathEntity> paths,
+  ) async {
+    final albumOptions = <DeviceAlbumPathOption>[];
+    for (final albumPath in paths) {
+      albumOptions.add(
+        DeviceAlbumPathOption(
+          id: albumPath.id,
+          name: albumPath.name,
+          assetCount: await albumPath.assetCountAsync,
+          path: albumPath,
+        ),
+      );
+    }
+    return albumOptions;
   }
 
   Future<void> openAlbumSettings() => PhotoManager.openSetting();
@@ -416,7 +500,7 @@ class ImagePickerService {
         '${DateTime.now().microsecondsSinceEpoch}_${source.name}_$id$extension';
     final targetPath = p.join(mediaDir.path, filename);
     await sourceFile.copy(targetPath);
-    return targetPath;
+    return p.join('post_media', filename);
   }
 
   Future<String?> _generateVideoThumbnail(String videoPath) async {
@@ -442,7 +526,7 @@ class ImagePickerService {
     final filename = '${DateTime.now().microsecondsSinceEpoch}_thumb_$id.jpg';
     final targetPath = p.join(mediaDir.path, filename);
     await File(targetPath).writeAsBytes(bytes, flush: true);
-    return targetPath;
+    return p.join('post_media', filename);
   }
 
   Future<Directory> _mediaDirectory() async {
@@ -450,5 +534,27 @@ class ImagePickerService {
     final mediaDir = Directory(p.join(documentsDir.path, 'post_media'));
     await mediaDir.create(recursive: true);
     return mediaDir;
+  }
+
+  Future<int?> _imageWidth(String path) async {
+    final size = await _imageSize(path);
+    return size?.width.toInt();
+  }
+
+  Future<int?> _imageHeight(String path) async {
+    final size = await _imageSize(path);
+    return size?.height.toInt();
+  }
+
+  Future<ui.Size?> _imageSize(String path) async {
+    try {
+      final bytes = await File(path).readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+      return ui.Size(image.width.toDouble(), image.height.toDouble());
+    } on Object {
+      return null;
+    }
   }
 }

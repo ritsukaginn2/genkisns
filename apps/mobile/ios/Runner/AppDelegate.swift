@@ -10,7 +10,18 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    // Clean up pending camera result if app backgrounded while picker is open
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(appWillBackground),
+      name: UIApplication.willResignActiveNotification,
+      object: nil
+    )
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  @objc private func appWillBackground() {
+    cameraCapture.cancelPending()
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
@@ -236,6 +247,12 @@ final class NativeCameraCapture: NSObject, UINavigationControllerDelegate, UIIma
     let result = pendingResult
     pendingResult = nil
     result?(value)
+  }
+
+  func cancelPending() {
+    if pendingResult != nil {
+      finish(FlutterError(code: "camera_cancelled", message: "Camera was interrupted.", details: nil))
+    }
   }
 
   private static func topViewController() -> UIViewController? {

@@ -16,6 +16,7 @@ class ProfilePage extends StatelessWidget {
     required this.onOpenFriends,
     required this.onOpenICloudBackup,
     required this.onClearLocalContent,
+    required this.onExportData,
   });
 
   final UserProfile user;
@@ -26,6 +27,7 @@ class ProfilePage extends StatelessWidget {
   final VoidCallback onOpenFriends;
   final VoidCallback onOpenICloudBackup;
   final Future<void> Function() onClearLocalContent;
+  final Future<void> Function() onExportData;
 
   @override
   Widget build(BuildContext context) {
@@ -89,6 +91,14 @@ class ProfilePage extends StatelessWidget {
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   _SettingsTile(
+                    icon: Icons.download_outlined,
+                    iconColor: AppColors.teal,
+                    title: '导出数据',
+                    subtitle: '下载笔记和互动数据为 JSON 文件',
+                    onTap: () => _exportData(context),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _SettingsTile(
                     icon: Icons.delete_sweep_outlined,
                     iconColor: AppColors.coral,
                     title: '清空本地内容',
@@ -102,6 +112,10 @@ class ProfilePage extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _exportData(BuildContext context) async {
+    await onExportData();
   }
 
   Future<void> _confirmClear(BuildContext context) async {

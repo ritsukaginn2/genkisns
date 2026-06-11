@@ -119,6 +119,7 @@ Widget? buildPreviewRoute({required String? view, required String fragment}) {
       onOpenFriends: () {},
       onOpenICloudBackup: () {},
       onClearLocalContent: () async {},
+      onExportData: () async {},
     ),
     'about' => const AboutPage(),
     'friends' => FriendsPage(friends: presetFriends.take(5).toList()),

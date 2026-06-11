@@ -2,14 +2,17 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 import '../data/services/llm_client.dart';
+import '../data/services/iap_service.dart';
 
 class EntitlementsPage extends StatefulWidget {
   const EntitlementsPage({
     super.key,
     required this.llmClient,
+    required this.iapService,
   });
 
   final LLMClient llmClient;
+  final IAPService iapService;
 
   @override
   State<EntitlementsPage> createState() => _EntitlementsPageState();
@@ -91,7 +94,7 @@ class _EntitlementsPageState extends State<EntitlementsPage> {
                     // Pro Plan Info
                     if (!entitlements.isPro)
                       _ProPlanCard(
-                        onPurchase: () => _showPurchaseDialog(context),
+                        iapService: widget.iapService,
                       ),
                   ],
                 ),
@@ -103,37 +106,6 @@ class _EntitlementsPageState extends State<EntitlementsPage> {
     );
   }
 
-  void _showPurchaseDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('升级到 Pro'),
-        content: const Text(
-          'Pro 套餐包含:\n'
-          '• 每天 3000 条生成配额\n'
-          '• 优先生成\n'
-          '• 无限制生成期限\n\n'
-          '价格: ¥99/年',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              // TODO: Integrate with Apple IAP
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('IAP 集成开发中...')),
-              );
-            },
-            child: const Text('购买'),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _PlanCard extends StatelessWidget {
@@ -268,12 +240,43 @@ class _QuotaWidget extends StatelessWidget {
   }
 }
 
-class _ProPlanCard extends StatelessWidget {
+class _ProPlanCard extends StatefulWidget {
   const _ProPlanCard({
-    required this.onPurchase,
+    required this.iapService,
   });
 
-  final VoidCallback onPurchase;
+  final IAPService iapService;
+
+  @override
+  State<_ProPlanCard> createState() => _ProPlanCardState();
+}
+
+class _ProPlanCardState extends State<_ProPlanCard> {
+  bool _isPurchasing = false;
+
+  Future<void> _handlePurchase() async {
+    setState(() => _isPurchasing = true);
+
+    try {
+      await widget.iapService.purchaseProAnnual();
+      // IAP service will handle verification and update entitlements
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('感谢购买！正在验证订单...')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('购买失败: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isPurchasing = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -307,9 +310,15 @@ class _ProPlanCard extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: onPurchase,
-              icon: const Icon(Icons.shopping_cart),
-              label: const Text('¥99/年 - 立即购买'),
+              onPressed: _isPurchasing ? null : _handlePurchase,
+              icon: _isPurchasing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.shopping_cart),
+              label: Text(_isPurchasing ? '处理中...' : '¥99/年 - 立即购买'),
             ),
           ),
         ],

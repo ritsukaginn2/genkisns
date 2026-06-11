@@ -1,5 +1,9 @@
+import 'package:logger/logger.dart';
 import '../../mock/mock_data.dart';
 import '../../models.dart';
+import 'llm_client.dart';
+
+final logger = Logger();
 
 class InteractionResult {
   const InteractionResult({
@@ -14,35 +18,117 @@ class InteractionResult {
 }
 
 class InteractionService {
-  const InteractionService();
+  final LLMClient? llmClient;
 
+  InteractionService({this.llmClient});
+
+  /// Generate initial interactions using LLM or fallback to local template
   Future<InteractionResult> generateInitialInteractions({
     required PostSeed post,
     required UserProfile user,
     required List<AiFriend> friends,
     required DateTime now,
   }) async {
-    final comments = generateTemplateComments(
-      post: post,
-      friends: friends,
-      now: now,
-    );
-    if (comments.isEmpty) {
+    // If no LLM client, use fallback immediately
+    if (llmClient == null) {
+      logger.w('No LLM client available, using fallback');
       return _fallback(post: post, friends: friends, now: now);
     }
 
-    return InteractionResult(
-      likeCount: _likeCountFor(
+    try {
+      // Try to use real LLM
+      return await _generateWithLLM(
         post: post,
         user: user,
         friends: friends,
-        comments: comments,
-      ),
-      comments: comments,
-      usedFallback: false,
-    );
+        now: now,
+      );
+    } catch (e) {
+      logger.e('LLM generation failed: $e, using fallback');
+      // Fall back to template generation
+      return _fallback(post: post, friends: friends, now: now);
+    }
   }
 
+  /// Generate interactions using real LLM backend
+  Future<InteractionResult> _generateWithLLM({
+    required PostSeed post,
+    required UserProfile user,
+    required List<AiFriend> friends,
+    required DateTime now,
+  }) async {
+    if (llmClient == null) throw Exception('LLM client not initialized');
+
+    // Get friends IDs
+    final friendIds = friends.isEmpty
+        ? presetFriends.take(3).map((f) => f.id).toList()
+        : friends.map((f) => f.id).toList();
+
+    try {
+      // Create job
+      final jobResponse = await llmClient!.createInteractionJob(
+        postId: 'post_${now.millisecondsSinceEpoch}',
+        text: post.text,
+        imageCount: post.images.length,
+        friendIds: friendIds,
+        userName: user.nickname,
+        userBio: user.bio,
+      );
+
+      // Poll result
+      final jobDetail = await llmClient!.getJobResult(jobResponse.jobId);
+
+      if (jobDetail == null || jobDetail.status == JobStatus.failed) {
+        logger.e('Job failed or timed out: ${jobDetail?.reason}');
+        throw Exception('LLM job failed');
+      }
+
+      if (jobDetail.result == null) {
+        throw Exception('No result from LLM');
+      }
+
+      // Convert LLM result to Comment objects
+      final llmResult = jobDetail.result!;
+      final comments = <Comment>[];
+
+      for (final commentData in llmResult.comments) {
+        final friend = friends.firstWhere(
+          (f) => f.id == commentData.actorId,
+          orElse: () => presetFriends.firstWhere(
+            (f) => f.id == commentData.actorId,
+            orElse: () => presetFriends.first,
+          ),
+        );
+
+        comments.add(Comment(
+          id: 'c_${now.millisecondsSinceEpoch}_${comments.length}',
+          postId: '', // Will be set by PostRepository
+          actorId: friend.id,
+          actorNameSnapshot: friend.name,
+          actorAvatarSnapshot: friend.avatarInitial,
+          actorColor: friend.color,
+          content: commentData.content,
+          createdAt: now,
+          likeCount: commentData.likeCount,
+          replies: const [],
+        ));
+      }
+
+      return InteractionResult(
+        likeCount: llmResult.aiLikeCount,
+        comments: comments,
+        usedFallback: false,
+      );
+    } on QuotaExceededException {
+      logger.w('Quota exceeded, using fallback');
+      rethrow;
+    } on RateLimitedException {
+      logger.w('Rate limited, using fallback');
+      rethrow;
+    }
+  }
+
+  /// Fall back to template-based generation (local, fast)
   InteractionResult _fallback({
     required PostSeed post,
     required List<AiFriend> friends,
@@ -60,26 +146,4 @@ class InteractionService {
     );
   }
 
-  int _likeCountFor({
-    required PostSeed post,
-    required UserProfile user,
-    required List<AiFriend> friends,
-    required List<Comment> comments,
-  }) {
-    final userBoost = user.nickname.trim().isEmpty ? 0 : 1;
-    final textBoost = post.text.trim().isEmpty ? 0 : 4;
-    final hasVideo = post.images.any(
-      (image) => image.type == PostMediaType.video,
-    );
-    final imageCount = post.images
-        .where((image) => image.type == PostMediaType.image)
-        .length;
-    final mediaBoost = hasVideo ? 6 : (imageCount * 2).clamp(0, 10).toInt();
-    return comments.length +
-        friends.length +
-        8 +
-        userBoost +
-        textBoost +
-        mediaBoost;
-  }
 }

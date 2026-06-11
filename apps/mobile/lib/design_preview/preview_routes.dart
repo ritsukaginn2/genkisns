@@ -9,6 +9,7 @@ import '../pages/home_page.dart';
 import '../pages/post_detail_page.dart';
 import '../pages/profile_page.dart';
 import '../theme/app_theme.dart';
+import '../data/services/llm_client.dart';
 import 'board_preview_page.dart';
 
 Widget? buildPreviewRoute({required String? view, required String fragment}) {
@@ -120,6 +121,7 @@ Widget? buildPreviewRoute({required String? view, required String fragment}) {
       onOpenICloudBackup: () {},
       onClearLocalContent: () async {},
       onExportData: () async {},
+      llmClient: _mockLLMClient(),
     ),
     'about' => const AboutPage(),
     'friends' => FriendsPage(friends: presetFriends.take(5).toList()),
@@ -138,4 +140,9 @@ Widget? buildPreviewRoute({required String? view, required String fragment}) {
     ),
     _ => null,
   };
+}
+
+LLMClient _mockLLMClient() {
+  // Mock LLM client for design preview
+  return LLMClient();
 }

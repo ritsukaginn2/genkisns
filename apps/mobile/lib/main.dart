@@ -242,17 +242,25 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
       final posts = postRepository?.listPosts() ?? [];
       final file = await dataExportService.exportPostsAsJson(posts);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('已导出数据到: ${file.path.split('/').last}'),
-          duration: const Duration(seconds: 3),
-        ),
-      );
+      try {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('已导出数据到: ${file.path.split('/').last}'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      } catch (e) {
+        debugPrint('Failed to show snackbar: $e');
+      }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('导出失败: $e')),
-      );
+      try {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导出失败: $e')),
+        );
+      } catch (_) {
+        debugPrint('Failed to show error snackbar: $e');
+      }
     }
   }
 

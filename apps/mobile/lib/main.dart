@@ -10,6 +10,7 @@ import 'data/repositories/user_repository.dart';
 import 'data/services/data_export_service.dart';
 import 'data/services/icloud_backup_service.dart';
 import 'data/services/interaction_service.dart';
+import 'data/services/llm_client.dart';
 import 'data/stores/post_store.dart';
 import 'data/stores/sqlite_post_store.dart';
 import 'design_preview/preview_routes.dart';
@@ -44,6 +45,7 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
   late final AiFriendRepository aiFriendRepository;
   final iCloudBackupService = const ICloudBackupService();
   final dataExportService = const DataExportService();
+  final llmClient = LLMClient();
   PostRepository? postRepository;
   Timer? iCloudBackupDebounce;
   Object? loadError;
@@ -65,13 +67,16 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
 
   Future<void> _initializeDataLayer() async {
     try {
+      // Initialize LLM client first
+      await llmClient.init();
+
       if (!kIsWeb && widget.postStoreFactory == null) {
         await iCloudBackupService.restoreIfLocalDataMissing();
       }
       final storeFactory = widget.postStoreFactory ?? _defaultPostStoreFactory;
       final store = await storeFactory();
       final repository = PostRepository(
-        interactionService: InteractionService(),
+        interactionService: InteractionService(llmClient: llmClient),
         store: store,
       );
       await repository.load();
@@ -111,6 +116,7 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
                 onSetICloudSyncEnabled: _setICloudSyncEnabled,
                 onClearLocalContent: _clearLocalContent,
                 onExportData: _exportData,
+                llmClient: llmClient,
               ));
 
     return MaterialApp(
@@ -338,6 +344,7 @@ class GenkiShell extends StatefulWidget {
     required this.onSetICloudSyncEnabled,
     required this.onClearLocalContent,
     required this.onExportData,
+    required this.llmClient,
   });
 
   final UserProfile user;
@@ -356,6 +363,7 @@ class GenkiShell extends StatefulWidget {
   final Future<ICloudBackupStatus> Function(bool enabled) onSetICloudSyncEnabled;
   final Future<void> Function() onClearLocalContent;
   final Future<void> Function() onExportData;
+  final LLMClient llmClient;
 
   @override
   State<GenkiShell> createState() => _GenkiShellState();
@@ -418,6 +426,7 @@ class _GenkiShellState extends State<GenkiShell> {
           onOpenICloudBackup: _openICloudBackup,
           onClearLocalContent: widget.onClearLocalContent,
           onExportData: widget.onExportData,
+          llmClient: widget.llmClient,
         ),
       ),
     );

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 @immutable
@@ -95,6 +96,31 @@ class Post {
       interactionStatus: interactionStatus ?? this.interactionStatus,
     );
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Post &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          text == other.text &&
+          listEquals(images, other.images) &&
+          createdAt == other.createdAt &&
+          likeCount == other.likeCount &&
+          listEquals(comments, other.comments) &&
+          userLiked == other.userLiked &&
+          interactionStatus == other.interactionStatus;
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      text.hashCode ^
+      images.hashCode ^
+      createdAt.hashCode ^
+      likeCount.hashCode ^
+      comments.hashCode ^
+      userLiked.hashCode ^
+      interactionStatus.hashCode;
 }
 
 @immutable
@@ -175,6 +201,35 @@ class PostImageRef {
         ),
     ];
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PostImageRef &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          type == other.type &&
+          source == other.source &&
+          localRef == other.localRef &&
+          thumbnailRef == other.thumbnailRef &&
+          durationMillis == other.durationMillis &&
+          width == other.width &&
+          height == other.height &&
+          sortIndex == other.sortIndex &&
+          previewColor == other.previewColor;
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      type.hashCode ^
+      source.hashCode ^
+      localRef.hashCode ^
+      thumbnailRef.hashCode ^
+      durationMillis.hashCode ^
+      width.hashCode ^
+      height.hashCode ^
+      sortIndex.hashCode ^
+      previewColor.hashCode;
 }
 
 @immutable
@@ -232,6 +287,37 @@ class Comment {
       replies: replies ?? this.replies,
     );
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Comment &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          postId == other.postId &&
+          actorId == other.actorId &&
+          actorNameSnapshot == other.actorNameSnapshot &&
+          actorAvatarSnapshot == other.actorAvatarSnapshot &&
+          actorColor == other.actorColor &&
+          content == other.content &&
+          createdAt == other.createdAt &&
+          likeCount == other.likeCount &&
+          userLiked == other.userLiked &&
+          listEquals(replies, other.replies);
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      postId.hashCode ^
+      actorId.hashCode ^
+      actorNameSnapshot.hashCode ^
+      actorAvatarSnapshot.hashCode ^
+      actorColor.hashCode ^
+      content.hashCode ^
+      createdAt.hashCode ^
+      likeCount.hashCode ^
+      userLiked.hashCode ^
+      replies.hashCode;
 }
 
 @immutable
@@ -253,4 +339,27 @@ class LocalReply {
   final String targetActorNameSnapshot;
   final String content;
   final DateTime createdAt;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is LocalReply &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          commentId == other.commentId &&
+          authorNameSnapshot == other.authorNameSnapshot &&
+          authorAvatarSnapshot == other.authorAvatarSnapshot &&
+          targetActorNameSnapshot == other.targetActorNameSnapshot &&
+          content == other.content &&
+          createdAt == other.createdAt;
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      commentId.hashCode ^
+      authorNameSnapshot.hashCode ^
+      authorAvatarSnapshot.hashCode ^
+      targetActorNameSnapshot.hashCode ^
+      content.hashCode ^
+      createdAt.hashCode;
 }

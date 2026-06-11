@@ -7,6 +7,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'data/repositories/ai_friend_repository.dart';
 import 'data/repositories/post_repository.dart';
 import 'data/repositories/user_repository.dart';
+import 'data/services/data_export_service.dart';
 import 'data/services/icloud_backup_service.dart';
 import 'data/services/interaction_service.dart';
 import 'data/stores/post_store.dart';
@@ -42,6 +43,7 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
   late final UserRepository userRepository;
   late final AiFriendRepository aiFriendRepository;
   final iCloudBackupService = const ICloudBackupService();
+  final dataExportService = const DataExportService();
   PostRepository? postRepository;
   Timer? iCloudBackupDebounce;
   Object? loadError;
@@ -108,6 +110,7 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
                 onLoadICloudBackupStatus: iCloudBackupService.status,
                 onSetICloudSyncEnabled: _setICloudSyncEnabled,
                 onClearLocalContent: _clearLocalContent,
+                onExportData: _exportData,
               ));
 
     return MaterialApp(
@@ -201,6 +204,25 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
     await postRepository?.clearAllPosts();
     if (!mounted) return;
     setState(() {});
+  }
+
+  Future<void> _exportData() async {
+    try {
+      final posts = postRepository?.listPosts() ?? [];
+      final file = await dataExportService.exportPostsAsJson(posts);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已导出数据到: ${file.path.split('/').last}'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导出失败: $e')),
+      );
+    }
   }
 
   Future<ICloudBackupStatus> _setICloudSyncEnabled(bool enabled) async {
@@ -315,6 +337,7 @@ class GenkiShell extends StatefulWidget {
     required this.onLoadICloudBackupStatus,
     required this.onSetICloudSyncEnabled,
     required this.onClearLocalContent,
+    required this.onExportData,
   });
 
   final UserProfile user;
@@ -332,6 +355,7 @@ class GenkiShell extends StatefulWidget {
   final Future<ICloudBackupStatus> Function() onLoadICloudBackupStatus;
   final Future<ICloudBackupStatus> Function(bool enabled) onSetICloudSyncEnabled;
   final Future<void> Function() onClearLocalContent;
+  final Future<void> Function() onExportData;
 
   @override
   State<GenkiShell> createState() => _GenkiShellState();
@@ -393,6 +417,7 @@ class _GenkiShellState extends State<GenkiShell> {
           onOpenFriends: _openFriends,
           onOpenICloudBackup: _openICloudBackup,
           onClearLocalContent: widget.onClearLocalContent,
+          onExportData: widget.onExportData,
         ),
       ),
     );

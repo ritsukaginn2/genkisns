@@ -8,6 +8,7 @@ import 'data/repositories/ai_friend_repository.dart';
 import 'data/repositories/post_repository.dart';
 import 'data/repositories/user_repository.dart';
 import 'data/services/data_export_service.dart';
+import 'data/services/iap_service.dart';
 import 'data/services/icloud_backup_service.dart';
 import 'data/services/interaction_service.dart';
 import 'data/services/llm_client.dart';
@@ -46,6 +47,7 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
   final iCloudBackupService = const ICloudBackupService();
   final dataExportService = const DataExportService();
   final llmClient = LLMClient();
+  late final IAPService iapService;
   PostRepository? postRepository;
   Timer? iCloudBackupDebounce;
   Object? loadError;
@@ -55,6 +57,7 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
     super.initState();
     userRepository = const UserRepository();
     aiFriendRepository = AiFriendRepository();
+    iapService = IAPService(llmClient: llmClient);
     _initializeDataLayer();
   }
 
@@ -62,6 +65,7 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
   void dispose() {
     iCloudBackupDebounce?.cancel();
     postRepository?.close();
+    iapService.dispose();
     super.dispose();
   }
 
@@ -69,6 +73,9 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
     try {
       // Initialize LLM client first
       await llmClient.init();
+
+      // Initialize IAP
+      await iapService.init();
 
       if (!kIsWeb && widget.postStoreFactory == null) {
         await iCloudBackupService.restoreIfLocalDataMissing();
@@ -117,6 +124,7 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
                 onClearLocalContent: _clearLocalContent,
                 onExportData: _exportData,
                 llmClient: llmClient,
+                iapService: iapService,
               ));
 
     return MaterialApp(
@@ -345,6 +353,7 @@ class GenkiShell extends StatefulWidget {
     required this.onClearLocalContent,
     required this.onExportData,
     required this.llmClient,
+    required this.iapService,
   });
 
   final UserProfile user;
@@ -364,6 +373,7 @@ class GenkiShell extends StatefulWidget {
   final Future<void> Function() onClearLocalContent;
   final Future<void> Function() onExportData;
   final LLMClient llmClient;
+  final IAPService iapService;
 
   @override
   State<GenkiShell> createState() => _GenkiShellState();
@@ -427,6 +437,7 @@ class _GenkiShellState extends State<GenkiShell> {
           onClearLocalContent: widget.onClearLocalContent,
           onExportData: widget.onExportData,
           llmClient: widget.llmClient,
+          iapService: widget.iapService,
         ),
       ),
     );

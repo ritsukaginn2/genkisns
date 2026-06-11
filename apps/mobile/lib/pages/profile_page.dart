@@ -5,6 +5,7 @@ import '../theme/app_theme.dart';
 import '../widgets/avatar_mark.dart';
 import '../widgets/page_header.dart';
 import '../data/services/llm_client.dart';
+import '../data/services/iap_service.dart';
 import 'entitlements_page.dart';
 
 class ProfilePage extends StatelessWidget {
@@ -20,6 +21,7 @@ class ProfilePage extends StatelessWidget {
     required this.onClearLocalContent,
     required this.onExportData,
     required this.llmClient,
+    required this.iapService,
   });
 
   final UserProfile user;
@@ -32,6 +34,7 @@ class ProfilePage extends StatelessWidget {
   final Future<void> Function() onClearLocalContent;
   final Future<void> Function() onExportData;
   final LLMClient llmClient;
+  final IAPService iapService;
 
   @override
   Widget build(BuildContext context) {
@@ -129,7 +132,10 @@ class ProfilePage extends StatelessWidget {
   void _openEntitlements(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => EntitlementsPage(llmClient: llmClient),
+        builder: (_) => EntitlementsPage(
+          llmClient: llmClient,
+          iapService: iapService,
+        ),
       ),
     );
   }

@@ -8,7 +8,7 @@ import 'package:logger/logger.dart';
 final logger = Logger();
 
 class LLMClient {
-  static const String _baseUrl = 'https://api.genki-sns.com';
+  static const String _baseUrl = 'http://localhost:8000';
   static const String _installationIdKey = 'genki_llm_installation_id';
   static const String _installationIdDevKey = 'genki_llm_installation_id_dev';
 

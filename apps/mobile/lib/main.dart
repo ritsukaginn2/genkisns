@@ -61,6 +61,21 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
     _initializeDataLayer();
   }
 
+  void _startBackgroundICloudRestore() {
+    // Restore iCloud data in background without blocking startup
+    unawaited(
+      iCloudBackupService.restoreIfLocalDataMissing().then((_) {
+        if (mounted && postRepository != null) {
+          // Refresh post list if restore was successful
+          setState(() {});
+        }
+      }).catchError((e) {
+        // Silently log errors - don't show to user unless they manually trigger restore
+        debugPrint('Background iCloud restore error: $e');
+      }),
+    );
+  }
+
   @override
   void dispose() {
     iCloudBackupDebounce?.cancel();
@@ -77,11 +92,6 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
       // Initialize IAP
       await iapService.init();
 
-      // Disabled: iCloud restore on startup can timeout and crash the app.
-      // Users can manually restore via the profile page.
-      // if (!kIsWeb && widget.postStoreFactory == null) {
-      //   await iCloudBackupService.restoreIfLocalDataMissing();
-      // }
       final storeFactory = widget.postStoreFactory ?? _defaultPostStoreFactory;
       final store = await storeFactory();
       final repository = PostRepository(
@@ -94,6 +104,11 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
         return;
       }
       setState(() => postRepository = repository);
+
+      // Start iCloud restore in background after UI is ready (don't block startup)
+      if (!kIsWeb && widget.postStoreFactory == null) {
+        _startBackgroundICloudRestore();
+      }
     } on Object catch (error) {
       if (!mounted) return;
       setState(() => loadError = error);

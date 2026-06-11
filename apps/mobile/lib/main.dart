@@ -77,9 +77,11 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
       // Initialize IAP
       await iapService.init();
 
-      if (!kIsWeb && widget.postStoreFactory == null) {
-        await iCloudBackupService.restoreIfLocalDataMissing();
-      }
+      // Disabled: iCloud restore on startup can timeout and crash the app.
+      // Users can manually restore via the profile page.
+      // if (!kIsWeb && widget.postStoreFactory == null) {
+      //   await iCloudBackupService.restoreIfLocalDataMissing();
+      // }
       final storeFactory = widget.postStoreFactory ?? _defaultPostStoreFactory;
       final store = await storeFactory();
       final repository = PostRepository(

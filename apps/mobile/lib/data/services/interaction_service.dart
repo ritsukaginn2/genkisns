@@ -3,7 +3,7 @@ import '../../mock/mock_data.dart';
 import '../../models.dart';
 import 'llm_client.dart';
 
-final logger = Logger();
+final Logger _logger = Logger();
 
 class InteractionResult {
   const InteractionResult({
@@ -22,21 +22,27 @@ class InteractionService {
 
   InteractionService({this.llmClient});
 
-  /// Generate initial interactions using LLM or fallback to local template
-  Future<InteractionResult> generateInitialInteractions({
+  /// V1 primary path: local template interactions, generated synchronously so
+  /// publishing never waits on the network.
+  InteractionResult generateLocalInteractions({
+    required PostSeed post,
+    required List<AiFriend> friends,
+    required DateTime now,
+  }) {
+    return _fallback(post: post, friends: friends, now: now);
+  }
+
+  /// V1.6 upgrade path: try the real LLM backend in the background.
+  /// Returns null when no client is configured or generation fails — callers
+  /// keep the local template interactions in that case.
+  Future<InteractionResult?> tryGenerateWithLlm({
     required PostSeed post,
     required UserProfile user,
     required List<AiFriend> friends,
     required DateTime now,
   }) async {
-    // If no LLM client, use fallback immediately
-    if (llmClient == null) {
-      logger.w('No LLM client available, using fallback');
-      return _fallback(post: post, friends: friends, now: now);
-    }
-
+    if (llmClient == null) return null;
     try {
-      // Try to use real LLM
       return await _generateWithLLM(
         post: post,
         user: user,
@@ -44,9 +50,8 @@ class InteractionService {
         now: now,
       );
     } catch (e) {
-      logger.e('LLM generation failed: $e, using fallback');
-      // Fall back to template generation
-      return _fallback(post: post, friends: friends, now: now);
+      _logger.w('LLM generation failed, keeping local interactions: $e');
+      return null;
     }
   }
 
@@ -79,7 +84,7 @@ class InteractionService {
       final jobDetail = await llmClient!.getJobResult(jobResponse.jobId);
 
       if (jobDetail == null || jobDetail.status == JobStatus.failed) {
-        logger.e('Job failed or timed out: ${jobDetail?.reason}');
+        _logger.e('Job failed or timed out: ${jobDetail?.reason}');
         throw Exception('LLM job failed');
       }
 
@@ -120,10 +125,10 @@ class InteractionService {
         usedFallback: false,
       );
     } on QuotaExceededException {
-      logger.w('Quota exceeded, using fallback');
+      _logger.w('Quota exceeded, using fallback');
       rethrow;
     } on RateLimitedException {
-      logger.w('Rate limited, using fallback');
+      _logger.w('Rate limited, using fallback');
       rethrow;
     }
   }

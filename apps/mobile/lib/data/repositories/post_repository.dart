@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import '../../models.dart';
@@ -5,11 +6,19 @@ import '../services/interaction_service.dart';
 import '../stores/post_store.dart';
 
 class PostRepository {
-  PostRepository({required this.interactionService, PostStore? store})
-    : store = store ?? MemoryPostStore();
+  PostRepository({
+    required this.interactionService,
+    PostStore? store,
+    this.onPostUpdated,
+  }) : store = store ?? MemoryPostStore();
 
   final InteractionService interactionService;
   final PostStore store;
+
+  /// Notified when a post is updated outside a direct user action (e.g. the
+  /// background LLM upgrade replaces template interactions).
+  final void Function(Post post)? onPostUpdated;
+
   final List<Post> _posts = [];
 
   List<Post> listPosts() => List.unmodifiable(_posts);
@@ -45,9 +54,10 @@ class PostRepository {
       text: draft.text.trim(),
       images: List.unmodifiable(draft.images),
     );
-    final interactions = await interactionService.generateInitialInteractions(
+    // V1: local template interactions, generated synchronously — publishing
+    // never waits on the network.
+    final interactions = interactionService.generateLocalInteractions(
       post: seed,
-      user: user,
       friends: friends,
       now: now,
     );
@@ -58,14 +68,43 @@ class PostRepository {
       createdAt: now,
       likeCount: interactions.likeCount,
       comments: interactions.comments,
-      interactionStatus: interactions.usedFallback
-          ? InteractionStatus.fallback
-          : InteractionStatus.success,
+      interactionStatus: InteractionStatus.success,
     );
 
     _posts.insert(0, post);
     await store.upsertPost(post);
+
+    // V1.6: upgrade to real LLM interactions in the background when available.
+    unawaited(
+      _upgradeInteractionsWithLlm(seed: seed, user: user, friends: friends, now: now),
+    );
     return post;
+  }
+
+  Future<void> _upgradeInteractionsWithLlm({
+    required PostSeed seed,
+    required UserProfile user,
+    required List<AiFriend> friends,
+    required DateTime now,
+  }) async {
+    final result = await interactionService.tryGenerateWithLlm(
+      post: seed,
+      user: user,
+      friends: friends,
+      now: now,
+    );
+    if (result == null) return;
+
+    // The post may have been deleted or liked while the LLM was working.
+    final index = _posts.indexWhere((post) => post.id == seed.id);
+    if (index == -1) return;
+    final current = _posts[index];
+    final updated = current.copyWith(
+      likeCount: result.likeCount + (current.userLiked ? 1 : 0),
+      comments: result.comments,
+    );
+    await _replacePost(updated);
+    onPostUpdated?.call(updated);
   }
 
   Future<Post> togglePostLike(String postId) {

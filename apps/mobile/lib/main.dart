@@ -42,6 +42,7 @@ class GenkiSnsApp extends StatefulWidget {
 }
 
 class _GenkiSnsAppState extends State<GenkiSnsApp> {
+  final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
   late final UserRepository userRepository;
   late final AiFriendRepository aiFriendRepository;
   final iCloudBackupService = const ICloudBackupService();
@@ -61,21 +62,6 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
     _initializeDataLayer();
   }
 
-  void _startBackgroundICloudRestore() {
-    // Restore iCloud data in background without blocking startup
-    unawaited(
-      iCloudBackupService.restoreIfLocalDataMissing().then((_) {
-        if (mounted && postRepository != null) {
-          // Refresh post list if restore was successful
-          setState(() {});
-        }
-      }).catchError((e) {
-        // Silently log errors - don't show to user unless they manually trigger restore
-        debugPrint('Background iCloud restore error: $e');
-      }),
-    );
-  }
-
   @override
   void dispose() {
     iCloudBackupDebounce?.cancel();
@@ -86,17 +72,26 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
 
   Future<void> _initializeDataLayer() async {
     try {
-      // Initialize LLM client first
-      await llmClient.init();
-
-      // Initialize IAP
-      await iapService.init();
+      // Restore from iCloud after a reinstall, BEFORE the store creates a fresh
+      // database (restore is keyed on the local database file being absent).
+      // Best-effort: a restore failure must not block local-first startup.
+      if (!kIsWeb && widget.postStoreFactory == null) {
+        try {
+          await iCloudBackupService.restoreIfLocalDataMissing();
+        } on Object catch (e) {
+          debugPrint('Startup iCloud restore failed: $e');
+        }
+      }
 
       final storeFactory = widget.postStoreFactory ?? _defaultPostStoreFactory;
       final store = await storeFactory();
       final repository = PostRepository(
         interactionService: InteractionService(llmClient: llmClient),
         store: store,
+        onPostUpdated: (_) {
+          if (mounted) setState(() {});
+          _scheduleICloudBackup();
+        },
       );
       await repository.load();
       if (!mounted) {
@@ -105,14 +100,24 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
       }
       setState(() => postRepository = repository);
 
-      // Start iCloud restore in background after UI is ready (don't block startup)
-      if (!kIsWeb && widget.postStoreFactory == null) {
-        _startBackgroundICloudRestore();
-      }
+      // V1.6 backend services are not needed to render local content — warm
+      // them up in the background after the UI is ready.
+      unawaited(_initBackendServices());
     } on Object catch (error) {
       if (!mounted) return;
       setState(() => loadError = error);
     }
+  }
+
+  Future<void> _initBackendServices() async {
+    await Future.wait([
+      llmClient.init().catchError((Object e) {
+        debugPrint('LLM client init failed: $e');
+      }),
+      iapService.init().catchError((Object e) {
+        debugPrint('IAP init failed: $e');
+      }),
+    ]);
   }
 
   @override
@@ -147,6 +152,7 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
     return MaterialApp(
       title: 'GenkiSNS',
       debugShowCheckedModeBanner: false,
+      scaffoldMessengerKey: _scaffoldMessengerKey,
       locale: const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
       supportedLocales: const [
         Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
@@ -241,26 +247,16 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
     try {
       final posts = postRepository?.listPosts() ?? [];
       final file = await dataExportService.exportPostsAsJson(posts);
-      if (!mounted) return;
-      try {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('已导出数据到: ${file.path.split('/').last}'),
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      } catch (e) {
-        debugPrint('Failed to show snackbar: $e');
-      }
+      _scaffoldMessengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: Text('已导出数据到: ${file.path.split('/').last}'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
     } catch (e) {
-      if (!mounted) return;
-      try {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('导出失败: $e')),
-        );
-      } catch (_) {
-        debugPrint('Failed to show error snackbar: $e');
-      }
+      _scaffoldMessengerKey.currentState?.showSnackBar(
+        SnackBar(content: Text('导出失败: $e')),
+      );
     }
   }
 

@@ -5,24 +5,40 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:logger/logger.dart';
 
-final logger = Logger();
+final Logger _logger = Logger();
 
 class LLMClient {
-  static const String _baseUrl = 'http://localhost:8000';
+  /// Backend base URL. Override for local development with:
+  /// `flutter run --dart-define=GENKI_API_BASE=http://<mac-lan-ip>:8000`
+  /// (a physical iPhone cannot reach the Mac via `localhost`).
+  static const String _baseUrl = String.fromEnvironment(
+    'GENKI_API_BASE',
+    defaultValue: 'https://api.genki-sns.com',
+  );
   static const String _installationIdKey = 'genki_llm_installation_id';
   static const String _installationIdDevKey = 'genki_llm_installation_id_dev';
 
   late String _installationId;
   late SharedPreferences _prefs;
   final bool _isDevelopment;
+  Future<void>? _initFuture;
 
   LLMClient({bool isDevelopment = false}) : _isDevelopment = isDevelopment;
 
-  /// Initialize the LLM client - call this once at app startup
-  Future<void> init() async {
-    _prefs = await SharedPreferences.getInstance();
-    _installationId = await _getOrCreateInstallationId();
-    logger.i('LLM Client initialized with installation_id: $_installationId');
+  /// Initialize the LLM client. Idempotent: safe to call from app startup and
+  /// again lazily from any request method.
+  Future<void> init() => _initFuture ??= _doInit();
+
+  Future<void> _doInit() async {
+    try {
+      _prefs = await SharedPreferences.getInstance();
+      _installationId = await _getOrCreateInstallationId();
+      _logger.i('LLM Client initialized with installation_id: $_installationId');
+    } on Object {
+      // Clear the cached future so a later call can retry.
+      _initFuture = null;
+      rethrow;
+    }
   }
 
   /// Get or create installation ID
@@ -34,9 +50,9 @@ class LLMClient {
       try {
         id = await _registerInstallation();
         await _prefs.setString(key, id);
-        logger.i('Created new installation ID: $id');
+        _logger.i('Created new installation ID: $id');
       } catch (e) {
-        logger.e('Failed to register installation: $e');
+        _logger.e('Failed to register installation: $e');
         // Fallback: use temporary UUID (will try again next time)
         id = const Uuid().v4().replaceAll('-', '').substring(0, 32);
       }
@@ -65,7 +81,7 @@ class LLMClient {
         throw Exception('Failed to register: ${response.statusCode}');
       }
     } catch (e) {
-      logger.e('Installation registration error: $e');
+      _logger.e('Installation registration error: $e');
       rethrow;
     }
   }
@@ -79,6 +95,7 @@ class LLMClient {
     required String userName,
     required String? userBio,
   }) async {
+    await init();
     try {
       final response = await http.post(
         Uri.parse('$_baseUrl/v1/interactions/jobs'),
@@ -111,51 +128,45 @@ class LLMClient {
         throw Exception('Failed to create job: ${response.statusCode}');
       }
     } catch (e) {
-      logger.e('Create job error: $e');
+      _logger.e('Create job error: $e');
       rethrow;
     }
   }
 
-  /// Poll job result (with exponential backoff)
+  /// Poll job result with exponential backoff.
+  /// Fails fast on HTTP errors (e.g. 404 — retrying cannot help); only the
+  /// still-processing case is retried.
   Future<InteractionJobDetailResponse?> getJobResult(
     String jobId, {
     int maxAttempts = 30,
     Duration initialDelay = const Duration(milliseconds: 500),
   }) async {
-    int attempt = 0;
+    await init();
+    var delayMs = initialDelay.inMilliseconds;
 
-    while (attempt < maxAttempts) {
-      try {
-        final response = await http.get(
-          Uri.parse('$_baseUrl/v1/interactions/jobs/$jobId'),
-          headers: {
-            'X-Installation-Id': _installationId,
-          },
-        ).timeout(const Duration(seconds: 10));
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      final response = await http.get(
+        Uri.parse('$_baseUrl/v1/interactions/jobs/$jobId'),
+        headers: {
+          'X-Installation-Id': _installationId,
+        },
+      ).timeout(const Duration(seconds: 10));
 
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          final result = InteractionJobDetailResponse.fromJson(data);
-
-          if (result.status == JobStatus.completed || result.status == JobStatus.failed) {
-            return result;
-          }
-
-          // Job still processing, wait and retry
-          attempt++;
-          final delayMs = (initialDelay.inMilliseconds *
-                          (1.5 * attempt).toInt()).clamp(500, 5000);
-          await Future.delayed(Duration(milliseconds: delayMs));
-        } else {
-          throw Exception('Failed to get job: ${response.statusCode}');
-        }
-      } catch (e) {
-        logger.e('Get job error (attempt $attempt): $e');
-        if (attempt >= maxAttempts - 1) {
-          rethrow;
-        }
-        attempt++;
+      if (response.statusCode != 200) {
+        throw Exception('Failed to get job: ${response.statusCode}');
       }
+
+      final result = InteractionJobDetailResponse.fromJson(
+        jsonDecode(response.body),
+      );
+      if (result.status == JobStatus.completed ||
+          result.status == JobStatus.failed) {
+        return result;
+      }
+
+      // Job still processing — wait, then back off exponentially.
+      await Future.delayed(Duration(milliseconds: delayMs));
+      delayMs = (delayMs * 3 ~/ 2).clamp(500, 5000);
     }
 
     return null; // Timeout
@@ -163,9 +174,11 @@ class LLMClient {
 
   /// Get current entitlements
   Future<EntitlementResponse> getEntitlements() async {
+    await init();
     try {
       final response = await http.get(
-        Uri.parse('$_baseUrl/v1/entitlements?installation_id=$_installationId'),
+        Uri.parse('$_baseUrl/v1/entitlements'),
+        headers: {'X-Installation-Id': _installationId},
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
@@ -175,7 +188,7 @@ class LLMClient {
         throw Exception('Failed to get entitlements: ${response.statusCode}');
       }
     } catch (e) {
-      logger.e('Get entitlements error: $e');
+      _logger.e('Get entitlements error: $e');
       rethrow;
     }
   }
@@ -205,7 +218,7 @@ class LLMClient {
         throw Exception('Purchase verification failed: ${response.statusCode}');
       }
     } catch (e) {
-      logger.e('Verify purchase error: $e');
+      _logger.e('Verify purchase error: $e');
       rethrow;
     }
   }

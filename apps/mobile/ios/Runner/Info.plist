@@ -71,6 +71,14 @@
 			</array>
 		</dict>
 	</dict>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- Local development only: lets the app reach the V1.6 LLM proxy on the
+		     Mac's LAN IP over plain HTTP (use --dart-define=GENKI_API_BASE=...).
+		     Production traffic stays on HTTPS. -->
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

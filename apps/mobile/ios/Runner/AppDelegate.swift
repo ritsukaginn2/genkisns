@@ -45,11 +45,18 @@ import UIKit
     iCloudChannel.setMethodCallHandler { call, result in
       switch call.method {
       case "containerPath":
-        guard let url = FileManager.default.url(forUbiquityContainerIdentifier: nil) else {
-          result(FlutterError(code: "icloud_unavailable", message: "iCloud container is unavailable.", details: nil))
-          return
+        // url(forUbiquityContainerIdentifier:) may block while provisioning the
+        // container — Apple forbids calling it on the main thread (watchdog kill).
+        DispatchQueue.global(qos: .userInitiated).async {
+          let url = FileManager.default.url(forUbiquityContainerIdentifier: nil)
+          DispatchQueue.main.async {
+            if let url = url {
+              result(url.path)
+            } else {
+              result(FlutterError(code: "icloud_unavailable", message: "iCloud container is unavailable.", details: nil))
+            }
+          }
         }
-        result(url.path)
       case "downloadBackup":
         let timeoutMillis = (call.arguments as? [String: Any])?["timeoutMillis"] as? Int ?? 20000
         ICloudBackupDownloader.download(timeoutMillis: timeoutMillis, result: result)
@@ -67,17 +74,18 @@ import UIKit
 /// reads them.
 enum ICloudBackupDownloader {
   static func download(timeoutMillis: Int, result: @escaping FlutterResult) {
-    guard let container = FileManager.default.url(forUbiquityContainerIdentifier: nil) else {
-      result(false)
-      return
-    }
-    let backupRoot = container
-      .appendingPathComponent("Documents", isDirectory: true)
-      .appendingPathComponent("GenkiSNS", isDirectory: true)
-      .appendingPathComponent("V1Backup", isDirectory: true)
-
     DispatchQueue.global(qos: .userInitiated).async {
       let fm = FileManager.default
+
+      // Resolve the container off the main thread too — this call can block.
+      guard let container = fm.url(forUbiquityContainerIdentifier: nil) else {
+        DispatchQueue.main.async { result(false) }
+        return
+      }
+      let backupRoot = container
+        .appendingPathComponent("Documents", isDirectory: true)
+        .appendingPathComponent("GenkiSNS", isDirectory: true)
+        .appendingPathComponent("V1Backup", isDirectory: true)
 
       // The marker + database files gate whether a backup is considered valid,
       // so target them by their known logical paths (enumeration can surface

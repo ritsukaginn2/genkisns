@@ -18,180 +18,135 @@ class SqlitePostStore implements PostStore {
     final databasePath = await getDatabasesPath();
     final path = p.join(databasePath, 'genki_sns_v1.db');
 
-    // Try to open database, with graceful fallback
-    Database? database;
+    Database database;
     try {
-      database = await openDatabase(
-        path,
-        version: 3,
-        onConfigure: (db) async {
-          await db.execute('PRAGMA foreign_keys = ON');
-          try {
-            await db.execute('PRAGMA journal_mode = WAL');
-          } catch (e) {
-            // WAL mode might fail on some devices, that's ok
-            debugPrint('Warning: WAL mode not supported, falling back to default');
-          }
-        },
-        onCreate: (db, version) async {
-        await db.execute('''
-          CREATE TABLE posts (
-            id TEXT PRIMARY KEY,
-            text TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            like_count INTEGER NOT NULL,
-            user_liked INTEGER NOT NULL,
-            interaction_status TEXT NOT NULL
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE post_images (
-            id TEXT NOT NULL,
-            post_id TEXT NOT NULL,
-            type TEXT NOT NULL DEFAULT 'image',
-            source TEXT NOT NULL,
-            local_ref TEXT NOT NULL,
-            thumbnail_ref TEXT,
-            duration_millis INTEGER,
-            width INTEGER,
-            height INTEGER,
-            sort_index INTEGER NOT NULL,
-            preview_color INTEGER,
-            PRIMARY KEY (post_id, id),
-            FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE comments (
-            id TEXT NOT NULL,
-            post_id TEXT NOT NULL,
-            actor_id TEXT NOT NULL,
-            actor_name_snapshot TEXT NOT NULL,
-            actor_avatar_snapshot TEXT NOT NULL,
-            actor_color INTEGER NOT NULL,
-            content TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            like_count INTEGER NOT NULL,
-            user_liked INTEGER NOT NULL,
-            PRIMARY KEY (post_id, id),
-            FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE local_replies (
-            id TEXT NOT NULL,
-            post_id TEXT NOT NULL,
-            comment_id TEXT NOT NULL,
-            author_name_snapshot TEXT NOT NULL,
-            author_avatar_snapshot TEXT NOT NULL,
-            target_actor_name_snapshot TEXT NOT NULL,
-            content TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            PRIMARY KEY (post_id, comment_id, id),
-            FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
-          )
-        ''');
-      },
-      onUpgrade: (db, oldVersion, newVersion) async {
-        if (oldVersion < 2) {
-          await db.execute(
-            "ALTER TABLE post_images ADD COLUMN type TEXT NOT NULL DEFAULT 'image'",
-          );
-          await db.execute(
-            'ALTER TABLE post_images ADD COLUMN thumbnail_ref TEXT',
-          );
-          await db.execute(
-            'ALTER TABLE post_images ADD COLUMN duration_millis INTEGER',
-          );
-        }
-        if (oldVersion < 3) {
-          await db.execute('ALTER TABLE post_images ADD COLUMN width INTEGER');
-          await db.execute('ALTER TABLE post_images ADD COLUMN height INTEGER');
-        }
-      },
-      );
+      database = await _openAt(path);
     } catch (e) {
+      // The database failed to open (possibly corrupted). NEVER delete user
+      // data: move the unreadable files aside so they can be recovered, then
+      // start fresh. iCloud restore can also bring the data back.
       debugPrint('Error opening database: $e');
-      // If database is corrupted, delete it and try again
-      try {
-        final dbFile = File(path);
-        if (dbFile.existsSync()) {
-          dbFile.deleteSync();
-          debugPrint('Deleted corrupted database, trying again...');
-        }
-        database = await openDatabase(
-          path,
-          version: 3,
-          onConfigure: (db) async {
-            await db.execute('PRAGMA foreign_keys = ON');
-          },
-          onCreate: (db, version) async {
-            await db.execute('''
-              CREATE TABLE posts (
-                id TEXT PRIMARY KEY,
-                text TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                like_count INTEGER NOT NULL,
-                user_liked INTEGER NOT NULL,
-                interaction_status TEXT NOT NULL
-              )
-            ''');
-            await db.execute('''
-              CREATE TABLE post_images (
-                id TEXT NOT NULL,
-                post_id TEXT NOT NULL,
-                type TEXT NOT NULL DEFAULT 'image',
-                source TEXT NOT NULL,
-                local_ref TEXT NOT NULL,
-                thumbnail_ref TEXT,
-                duration_millis INTEGER,
-                width INTEGER,
-                height INTEGER,
-                sort_index INTEGER NOT NULL,
-                preview_color INTEGER,
-                PRIMARY KEY (post_id, id),
-                FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
-              )
-            ''');
-            await db.execute('''
-              CREATE TABLE comments (
-                id TEXT NOT NULL,
-                post_id TEXT NOT NULL,
-                actor_id TEXT NOT NULL,
-                actor_name_snapshot TEXT NOT NULL,
-                actor_avatar_snapshot TEXT NOT NULL,
-                actor_color INTEGER NOT NULL,
-                content TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                like_count INTEGER NOT NULL,
-                user_liked INTEGER NOT NULL,
-                PRIMARY KEY (post_id, id),
-                FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
-              )
-            ''');
-            await db.execute('''
-              CREATE TABLE local_replies (
-                id TEXT NOT NULL,
-                post_id TEXT NOT NULL,
-                comment_id TEXT NOT NULL,
-                author_name_snapshot TEXT NOT NULL,
-                author_avatar_snapshot TEXT NOT NULL,
-                target_actor_name_snapshot TEXT NOT NULL,
-                content TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                PRIMARY KEY (post_id, comment_id, id),
-                FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
-              )
-            ''');
-          },
-        );
-      } catch (retryError) {
-        debugPrint('Fatal error: Could not open database even after cleanup: $retryError');
-        rethrow;
-      }
+      _setAsideUnreadableDatabase(path);
+      database = await _openAt(path);
     }
     final documentsDir = await getApplicationDocumentsDirectory();
     return SqlitePostStore._(database, documentsDir);
+  }
+
+  static Future<Database> _openAt(String path) {
+    return openDatabase(
+      path,
+      version: 3,
+      onConfigure: _onConfigure,
+      onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
+    );
+  }
+
+  /// Renames the main database file and its WAL sidecars to `.unreadable-*`
+  /// backups instead of deleting them, so a transient failure never destroys
+  /// the user's only copy of their data.
+  static void _setAsideUnreadableDatabase(String path) {
+    final suffix = '.unreadable-${DateTime.now().millisecondsSinceEpoch}';
+    for (final filePath in [path, '$path-wal', '$path-shm', '$path-journal']) {
+      try {
+        final file = File(filePath);
+        if (file.existsSync()) {
+          file.renameSync('$filePath$suffix');
+        }
+      } on Object catch (e) {
+        debugPrint('Could not set aside $filePath: $e');
+      }
+    }
+    debugPrint('Set aside unreadable database as *$suffix, starting fresh.');
+  }
+
+  static Future<void> _onConfigure(Database db) async {
+    await db.execute('PRAGMA foreign_keys = ON');
+    try {
+      await db.execute('PRAGMA journal_mode = WAL');
+    } catch (e) {
+      // WAL mode might fail on some devices, that's ok
+      debugPrint('Warning: WAL mode not supported, falling back to default');
+    }
+  }
+
+  static Future<void> _onCreate(Database db, int version) async {
+    await db.execute('''
+      CREATE TABLE posts (
+        id TEXT PRIMARY KEY,
+        text TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        like_count INTEGER NOT NULL,
+        user_liked INTEGER NOT NULL,
+        interaction_status TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE post_images (
+        id TEXT NOT NULL,
+        post_id TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'image',
+        source TEXT NOT NULL,
+        local_ref TEXT NOT NULL,
+        thumbnail_ref TEXT,
+        duration_millis INTEGER,
+        width INTEGER,
+        height INTEGER,
+        sort_index INTEGER NOT NULL,
+        preview_color INTEGER,
+        PRIMARY KEY (post_id, id),
+        FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE comments (
+        id TEXT NOT NULL,
+        post_id TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        actor_name_snapshot TEXT NOT NULL,
+        actor_avatar_snapshot TEXT NOT NULL,
+        actor_color INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        like_count INTEGER NOT NULL,
+        user_liked INTEGER NOT NULL,
+        PRIMARY KEY (post_id, id),
+        FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE local_replies (
+        id TEXT NOT NULL,
+        post_id TEXT NOT NULL,
+        comment_id TEXT NOT NULL,
+        author_name_snapshot TEXT NOT NULL,
+        author_avatar_snapshot TEXT NOT NULL,
+        target_actor_name_snapshot TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (post_id, comment_id, id),
+        FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute(
+        "ALTER TABLE post_images ADD COLUMN type TEXT NOT NULL DEFAULT 'image'",
+      );
+      await db.execute(
+        'ALTER TABLE post_images ADD COLUMN thumbnail_ref TEXT',
+      );
+      await db.execute(
+        'ALTER TABLE post_images ADD COLUMN duration_millis INTEGER',
+      );
+    }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE post_images ADD COLUMN width INTEGER');
+      await db.execute('ALTER TABLE post_images ADD COLUMN height INTEGER');
+    }
   }
 
   @override

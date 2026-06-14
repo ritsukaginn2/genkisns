@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:genki_sns/data/repositories/ai_friend_repository.dart';
 import 'package:genki_sns/data/repositories/post_repository.dart';
 import 'package:genki_sns/data/repositories/user_repository.dart';
 import 'package:genki_sns/data/services/interaction_service.dart';
+import 'package:genki_sns/data/services/llm_client.dart';
 import 'package:genki_sns/models.dart';
 
 void main() {
@@ -223,4 +225,296 @@ void main() {
     expect(await mediaFile.exists(), isFalse);
     expect(await thumbnailFile.exists(), isFalse);
   });
+
+  test('LLM upgrade preserves local comment likes and replies', () async {
+    final llmClient = _ControlledLlmClient();
+    final updateCompleter = Completer<Post>();
+    final repository = PostRepository(
+      interactionService: InteractionService(llmClient: llmClient),
+      onPostUpdated: (post) {
+        if (!updateCompleter.isCompleted) updateCompleter.complete(post);
+      },
+    );
+    final user = const UserRepository().getDefaultUser();
+    final friends = AiFriendRepository().listSelectedFriends();
+
+    final post = await repository.createPost(
+      const PostDraft(text: '等待真实回应。', images: []),
+      user: user,
+      friends: friends,
+    );
+    final originalComment = post.comments.first;
+    await repository.toggleCommentLike(
+      postId: post.id,
+      commentId: originalComment.id,
+    );
+    await repository.addLocalReply(
+      postId: post.id,
+      commentId: originalComment.id,
+      user: user,
+      content: '这是本地回复。',
+    );
+
+    llmClient.complete();
+    final updated = await updateCompleter.future.timeout(
+      const Duration(seconds: 1),
+    );
+
+    expect(updated.comments.first.content, '真实 LLM 评论。');
+    expect(updated.comments.first.postId, post.id);
+    expect(updated.comments.first.userLiked, isTrue);
+    expect(updated.comments.first.likeCount, 4);
+    expect(updated.comments.first.replies.single.content, '这是本地回复。');
+    expect(
+      updated.comments.first.replies.single.commentId,
+      updated.comments.first.id,
+    );
+  });
+
+  test(
+    'LLM upgrade keeps replies when the same actor returns multiple comments',
+    () async {
+      final llmClient = _MultiCommentLlmClient();
+      final updateCompleter = Completer<Post>();
+      final repository = PostRepository(
+        interactionService: InteractionService(llmClient: llmClient),
+        onPostUpdated: (post) {
+          if (!updateCompleter.isCompleted) updateCompleter.complete(post);
+        },
+      );
+      final user = const UserRepository().getDefaultUser();
+      final friends = AiFriendRepository().listSelectedFriends();
+
+      final post = await repository.createPost(
+        const PostDraft(text: '等待多条回应。', images: []),
+        user: user,
+        friends: friends,
+      );
+      final mikaComment = post.comments.firstWhere(
+        (comment) => comment.actorId == 'friend_mika',
+      );
+      await repository.addLocalReply(
+        postId: post.id,
+        commentId: mikaComment.id,
+        user: user,
+        content: '挂在第一条上的回复。',
+      );
+
+      llmClient.complete();
+      final updated = await updateCompleter.future.timeout(
+        const Duration(seconds: 1),
+      );
+
+      final mikaComments = updated.comments
+          .where((comment) => comment.actorId == 'friend_mika')
+          .toList();
+      expect(mikaComments, hasLength(2));
+      expect(mikaComments.first.content, '第一条真实评论。');
+      expect(mikaComments.first.replies.single.content, '挂在第一条上的回复。');
+      expect(
+        mikaComments.first.replies.single.commentId,
+        mikaComments.first.id,
+      );
+      expect(mikaComments[1].replies, isEmpty);
+    },
+  );
+
+  test('tryGenerateWithLlm returns null when polling times out', () async {
+    final service = InteractionService(llmClient: _TimeoutLlmClient());
+    final result = await service.tryGenerateWithLlm(
+      post: const PostSeed(id: 'post_timeout', text: '超时降级。', images: []),
+      user: const UserRepository().getDefaultUser(),
+      friends: AiFriendRepository().listSelectedFriends(),
+      now: DateTime.now(),
+    );
+    expect(result, isNull);
+  });
+
+  test(
+    'tryGenerateWithLlm returns null when the backend signals fallback',
+    () async {
+      final service = InteractionService(llmClient: _FallbackLlmClient());
+      final result = await service.tryGenerateWithLlm(
+        post: const PostSeed(id: 'post_fallback', text: '受限降级。', images: []),
+        user: const UserRepository().getDefaultUser(),
+        friends: AiFriendRepository().listSelectedFriends(),
+        now: DateTime.now(),
+      );
+      expect(result, isNull);
+    },
+  );
+}
+
+class _ControlledLlmClient extends LLMClient {
+  _ControlledLlmClient() : super(isDevelopment: true);
+
+  final _resultReady = Completer<void>();
+
+  @override
+  bool get isBackendConfigured => true;
+
+  void complete() {
+    if (!_resultReady.isCompleted) _resultReady.complete();
+  }
+
+  @override
+  Future<void> init() async {}
+
+  @override
+  Future<InteractionJobResponse> createInteractionJob({
+    required String postId,
+    required String? text,
+    required int imageCount,
+    required bool hasVideo,
+    required int videoCount,
+    required List<AiFriend> friends,
+    required String userName,
+    required String? userBio,
+  }) async {
+    return InteractionJobResponse(jobId: 'job_1', status: JobStatus.queued);
+  }
+
+  @override
+  Future<InteractionJobDetailResponse?> getJobResult(
+    String jobId, {
+    int maxAttempts = 30,
+    Duration initialDelay = const Duration(milliseconds: 500),
+  }) async {
+    await _resultReady.future;
+    return InteractionJobDetailResponse(
+      jobId: jobId,
+      status: JobStatus.completed,
+      result: JobResult(
+        aiLikeCount: 18,
+        comments: [
+          CommentData(
+            actorId: 'friend_mika',
+            content: '真实 LLM 评论。',
+            likeCount: 3,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Returns two comments from the same actor to exercise the merge logic.
+class _MultiCommentLlmClient extends LLMClient {
+  _MultiCommentLlmClient() : super(isDevelopment: true);
+
+  final _resultReady = Completer<void>();
+
+  @override
+  bool get isBackendConfigured => true;
+
+  void complete() {
+    if (!_resultReady.isCompleted) _resultReady.complete();
+  }
+
+  @override
+  Future<void> init() async {}
+
+  @override
+  Future<InteractionJobResponse> createInteractionJob({
+    required String postId,
+    required String? text,
+    required int imageCount,
+    required bool hasVideo,
+    required int videoCount,
+    required List<AiFriend> friends,
+    required String userName,
+    required String? userBio,
+  }) async {
+    return InteractionJobResponse(jobId: 'job_multi', status: JobStatus.queued);
+  }
+
+  @override
+  Future<InteractionJobDetailResponse?> getJobResult(
+    String jobId, {
+    int maxAttempts = 30,
+    Duration initialDelay = const Duration(milliseconds: 500),
+  }) async {
+    await _resultReady.future;
+    return InteractionJobDetailResponse(
+      jobId: jobId,
+      status: JobStatus.completed,
+      result: JobResult(
+        aiLikeCount: 20,
+        comments: [
+          CommentData(
+            actorId: 'friend_mika',
+            content: '第一条真实评论。',
+            likeCount: 2,
+          ),
+          CommentData(
+            actorId: 'friend_mika',
+            content: '第二条真实评论。',
+            likeCount: 1,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Polling never resolves to a terminal result (simulates a timeout).
+class _TimeoutLlmClient extends LLMClient {
+  _TimeoutLlmClient() : super(isDevelopment: true);
+
+  @override
+  bool get isBackendConfigured => true;
+
+  @override
+  Future<void> init() async {}
+
+  @override
+  Future<InteractionJobResponse> createInteractionJob({
+    required String postId,
+    required String? text,
+    required int imageCount,
+    required bool hasVideo,
+    required int videoCount,
+    required List<AiFriend> friends,
+    required String userName,
+    required String? userBio,
+  }) async {
+    return InteractionJobResponse(
+      jobId: 'job_timeout',
+      status: JobStatus.queued,
+    );
+  }
+
+  @override
+  Future<InteractionJobDetailResponse?> getJobResult(
+    String jobId, {
+    int maxAttempts = 30,
+    Duration initialDelay = const Duration(milliseconds: 500),
+  }) async {
+    return null;
+  }
+}
+
+/// Rejects job creation with a fallback-required signal (blocked/limited/etc.).
+class _FallbackLlmClient extends LLMClient {
+  _FallbackLlmClient() : super(isDevelopment: true);
+
+  @override
+  bool get isBackendConfigured => true;
+
+  @override
+  Future<void> init() async {}
+
+  @override
+  Future<InteractionJobResponse> createInteractionJob({
+    required String postId,
+    required String? text,
+    required int imageCount,
+    required bool hasVideo,
+    required int videoCount,
+    required List<AiFriend> friends,
+    required String userName,
+    required String? userBio,
+  }) async {
+    throw BackendFallbackException('installation_blocked');
+  }
 }

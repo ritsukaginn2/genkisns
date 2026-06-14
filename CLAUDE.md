@@ -4,7 +4,7 @@
 
 ```text
 apps/mobile/          Flutter App
-services/llm-proxy/   V1.6 LLM 代理后端
+services/llm-proxy/   V1.6 审核与 LLM 调用后端
 docs/                 产品、设计、架构文档
 ```
 
@@ -21,9 +21,9 @@ flutter run -d <device-id>
 
 - V1 Flutter App 已进入原生运行验收阶段。
 - V1 已接入本地 SQLite，发布内容、图片引用、喜欢、AI 评论和本地回复需要跨重启恢复。
-- V1 不接入真实 LLM 后端，AI 互动先由本地模板生成。
-- V1.6 实现 `services/llm-proxy`、付费额度、队列和真实 LLM。
-- 真实 LLM provider API key 禁止写入 Flutter App，只能放在后端环境变量或云端 secret 中。
+- V1 不依赖真实 LLM 后端，AI 互动先由本地模板生成；配置 V1.6 后端后可后台升级为真实 LLM 结果。
+- `services/llm-proxy` 已完成 V1.6 后端：安装实例审核、内容安全审核、队列化 LLM 调用、限流、预算保护、结果校验和 fallback 友好响应。
+- 托管 LLM provider API key 禁止写入 Flutter App，只能放在后端环境变量或云端 secret 中。
 
 ## 关键规则
 
@@ -37,7 +37,7 @@ flutter run -d <device-id>
 ## 关键文档
 
 - V1 需求文档：`docs/v1-mvp/需求文档.md`
-- V1.6 需求文档：`docs/v1.6-llm-billing/需求文档.md`
+- V1.6 需求文档：`docs/v1.6-backend/需求文档.md`
 - V1 前端架构：`docs/v1-mvp/frontend_architecture.md`
 - V1 后端与数据架构：`docs/v1-mvp/backend_architecture.md`
 - V1 Flutter Run 验收清单：`docs/v1-mvp/FlutterRun验收清单.md`

@@ -41,7 +41,7 @@ class InteractionService {
     required List<AiFriend> friends,
     required DateTime now,
   }) async {
-    if (llmClient == null) return null;
+    if (llmClient == null || !llmClient!.isBackendConfigured) return null;
     try {
       return await _generateWithLLM(
         post: post,
@@ -64,50 +64,59 @@ class InteractionService {
   }) async {
     if (llmClient == null) throw Exception('LLM client not initialized');
 
-    // Get friends IDs
-    final friendIds = friends.isEmpty
-        ? presetFriends.take(3).map((f) => f.id).toList()
-        : friends.map((f) => f.id).toList();
+    final selectedFriends = friends.isEmpty
+        ? presetFriends.take(3).toList()
+        : friends;
+    final imageCount = post.images
+        .where((image) => image.type == PostMediaType.image)
+        .length;
+    final videoCount = post.images
+        .where((image) => image.type == PostMediaType.video)
+        .length;
 
-    try {
-      // Create job
-      final jobResponse = await llmClient!.createInteractionJob(
-        postId: 'post_${now.millisecondsSinceEpoch}',
-        text: post.text,
-        imageCount: post.images.length,
-        friendIds: friendIds,
-        userName: user.nickname,
-        userBio: user.bio,
-      );
+    // Create job, then poll for the result. Any thrown error (quota, rate limit,
+    // backend fallback, timeout) propagates to tryGenerateWithLlm, which logs it
+    // and keeps the local template interactions.
+    final jobResponse = await llmClient!.createInteractionJob(
+      postId: post.id,
+      text: post.text,
+      imageCount: imageCount,
+      hasVideo: videoCount > 0,
+      videoCount: videoCount,
+      friends: selectedFriends,
+      userName: user.nickname,
+      userBio: user.bio,
+    );
 
-      // Poll result
-      final jobDetail = await llmClient!.getJobResult(jobResponse.jobId);
+    final jobDetail = await llmClient!.getJobResult(jobResponse.jobId);
 
-      if (jobDetail == null || jobDetail.status == JobStatus.failed) {
-        _logger.e('Job failed or timed out: ${jobDetail?.reason}');
-        throw Exception('LLM job failed');
-      }
+    if (jobDetail == null || jobDetail.status == JobStatus.failed) {
+      _logger.e('Job failed or timed out: ${jobDetail?.reason}');
+      throw Exception('LLM job failed');
+    }
 
-      if (jobDetail.result == null) {
-        throw Exception('No result from LLM');
-      }
+    final llmResult = jobDetail.result;
+    if (llmResult == null) {
+      throw Exception('No result from LLM');
+    }
 
-      // Convert LLM result to Comment objects
-      final llmResult = jobDetail.result!;
-      final comments = <Comment>[];
-
-      for (final commentData in llmResult.comments) {
-        final friend = friends.firstWhere(
-          (f) => f.id == commentData.actorId,
-          orElse: () => presetFriends.firstWhere(
-            (f) => f.id == commentData.actorId,
-            orElse: () => presetFriends.first,
-          ),
+    // Convert LLM result to Comment objects.
+    final comments = <Comment>[];
+    for (final commentData in llmResult.comments) {
+      final friend = _resolveFriend(commentData.actorId, selectedFriends);
+      if (friend == null) {
+        // The backend validates actor_id against the friends we sent, so this
+        // should not happen. If it does, skip the comment rather than silently
+        // attributing it to the wrong friend.
+        _logger.w(
+          'Skipping LLM comment with unknown actor_id: ${commentData.actorId}',
         );
-
-        comments.add(Comment(
+        continue;
+      }
+      comments.add(
+        Comment(
           id: 'c_${now.millisecondsSinceEpoch}_${comments.length}',
-          postId: '', // Will be set by PostRepository
+          postId: post.id,
           actorId: friend.id,
           actorNameSnapshot: friend.name,
           actorAvatarSnapshot: friend.avatarInitial,
@@ -116,21 +125,31 @@ class InteractionService {
           createdAt: now,
           likeCount: commentData.likeCount,
           replies: const [],
-        ));
-      }
-
-      return InteractionResult(
-        likeCount: llmResult.aiLikeCount,
-        comments: comments,
-        usedFallback: false,
+        ),
       );
-    } on QuotaExceededException {
-      _logger.w('Quota exceeded, using fallback');
-      rethrow;
-    } on RateLimitedException {
-      _logger.w('Rate limited, using fallback');
-      rethrow;
     }
+
+    if (comments.isEmpty) {
+      throw Exception('LLM returned no usable comments');
+    }
+
+    return InteractionResult(
+      likeCount: llmResult.aiLikeCount,
+      comments: comments,
+      usedFallback: false,
+    );
+  }
+
+  /// Resolves a backend `actor_id` to a known friend, or null if it matches
+  /// neither the friends we sent nor any preset friend.
+  AiFriend? _resolveFriend(String actorId, List<AiFriend> selectedFriends) {
+    for (final friend in selectedFriends) {
+      if (friend.id == actorId) return friend;
+    }
+    for (final friend in presetFriends) {
+      if (friend.id == actorId) return friend;
+    }
+    return null;
   }
 
   /// Fall back to template-based generation (local, fast)
@@ -150,5 +169,4 @@ class InteractionService {
       usedFallback: true,
     );
   }
-
 }

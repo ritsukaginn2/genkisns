@@ -1,0 +1,15 @@
+{
+  "name": "@genki-sns/llm-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "GenkiSNS V1.6 review and LLM proxy backend.",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

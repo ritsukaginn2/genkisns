@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../data/services/media_storage.dart';
 import '../models.dart';
 import '../theme/app_theme.dart';
 import 'post_image_view.dart';
@@ -279,7 +280,12 @@ class _VideoSurfaceState extends State<VideoSurface> {
   }
 
   Future<void> _initialize() async {
-    final file = File(widget.media.localRef);
+    final path = MediaStorage.resolve(widget.media.localRef);
+    if (path == null) {
+      if (mounted) setState(() => error = StateError('Video file not found.'));
+      return;
+    }
+    final file = File(path);
     if (!await file.exists()) {
       if (mounted) setState(() => error = StateError('Video file not found.'));
       return;

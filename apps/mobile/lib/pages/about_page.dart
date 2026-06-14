@@ -21,19 +21,19 @@ class AboutPage extends StatelessWidget {
                   const _AboutCard(
                     icon: Icons.auto_awesome,
                     title: 'AI 互动',
-                    body: '点赞和评论由 AI 好友生成，给你一个被看见的感觉。',
+                    body: '点赞和评论会先在本机生成；配置后端后，可经审核升级为真实 LLM 结果。',
                   ),
                   const SizedBox(height: AppSpacing.md),
                   const _AboutCard(
                     icon: Icons.text_snippet_outlined,
-                    title: '文字只在本机使用',
-                    body: 'V1 的评论由本地模板生成，不会把发帖文字发送到云端 LLM。',
+                    title: '文本审核',
+                    body: '未配置后端时文字只在本机使用；配置后端时，仅文本和媒体数量等元数据会发送给后端审核与生成。',
                   ),
                   const SizedBox(height: AppSpacing.md),
                   const _AboutCard(
                     icon: Icons.perm_media_outlined,
                     title: '媒体本地优先',
-                    body: '图片和视频保存在本机，用于笔记展示。',
+                    body: '图片和视频文件保存在本机，V1.6 不会把图片或视频文件发送给后端或 LLM。',
                   ),
                   const SizedBox(height: AppSpacing.md),
                   const _AboutCard(

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../data/services/media_storage.dart';
 import '../models.dart';
 
 class PostImageView extends StatelessWidget {
@@ -53,13 +54,14 @@ class _ImageCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!image.localRef.startsWith('preview://')) {
+    final path = MediaStorage.resolve(image.localRef);
+    if (path != null) {
       return ClipRRect(
         borderRadius: borderRadius,
         child: LayoutBuilder(
           builder: (context, constraints) {
             return Image.file(
-              File(image.localRef),
+              File(path),
               fit: fit,
               width: double.infinity,
               height: double.infinity,
@@ -96,18 +98,20 @@ class _VideoCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final thumbnailRef = image.thumbnailRef;
+    final thumbnailPath = image.thumbnailRef == null
+        ? null
+        : MediaStorage.resolve(image.thumbnailRef!);
 
     return ClipRRect(
       borderRadius: borderRadius,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (thumbnailRef != null)
+          if (thumbnailPath != null)
             LayoutBuilder(
               builder: (context, constraints) {
                 return Image.file(
-                  File(thumbnailRef),
+                  File(thumbnailPath),
                   fit: fit,
                   gaplessPlayback: true,
                   cacheWidth: _decodeCacheWidth(context, constraints),

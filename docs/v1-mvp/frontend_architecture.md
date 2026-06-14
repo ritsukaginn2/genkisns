@@ -18,7 +18,9 @@ apps/mobile/
         post_repository.dart      ← 笔记创建、读取与写穿持久化
       services/
         interaction_service.dart  ← AI 互动生成入口与 fallback
+        llm_client.dart           ← V1.6 审核与 LLM 后端客户端；后端地址通过 GENKI_API_BASE 配置
         image_picker_service.dart ← 系统相机拍照/拍视频、App 内相册选择、文件复制和本地引用生成
+        media_storage.dart        ← 本地媒体文件路径初始化与引用解析
         icloud_backup_service.dart ← iOS iCloud 备份/恢复本机数据库和媒体目录
       stores/
         post_store.dart           ← 笔记本地持久化接口与内存测试实现
@@ -42,7 +44,7 @@ apps/mobile/
     widgets/
       avatar_mark.dart            ← 头像组件
       page_header.dart            ← 二级页统一顶部栏
-services/llm-proxy/               ← V1.6 LLM 代理后端
+services/llm-proxy/               ← V1.6 审核与 LLM 调用后端
 ```
 
 ---
@@ -185,7 +187,7 @@ V1 不使用底部 Tab。
 
 ---
 
-## Phase 4c 前后端对齐
+## Phase 4c Flutter 与数据层对齐
 
 - 页面不直接读取 `apps/mobile/lib/mock/mock_data.dart`；Phase 5 改为读取 Repository/Service。
 - `apps/mobile/lib/mock/mock_data.dart` 只保留为 Repository 初始化种子和设计预览数据。
@@ -193,6 +195,7 @@ V1 不使用底部 Tab。
 - `Comment.actorColor` 是当前 UI 渲染字段；接数据层后来自 `actorAvatarColorSnapshot`。
 - UI 实验室和 board preview 继续留在 `apps/mobile/lib/design_preview/` 与正式数据层隔离。
 - Phase 5 已建立 `UserRepository`、`AiFriendRepository`、`PostRepository`、`InteractionService` 和 `ImagePickerService`。正式 app 入口不再自己拼装帖子和评论。
+- 当前正式 V1 主流程不依赖真实后端。`LLMClient` 通过 `GENKI_API_BASE` 可选接入 V1.6 后端；旧的权益/额度与 IAP 预留代码已从 V1.6 主线移除。
 
 ### 页面数据源
 

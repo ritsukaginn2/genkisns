@@ -4,9 +4,6 @@ import '../models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/avatar_mark.dart';
 import '../widgets/page_header.dart';
-import '../data/services/llm_client.dart';
-import '../data/services/iap_service.dart';
-import 'entitlements_page.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({
@@ -20,8 +17,6 @@ class ProfilePage extends StatelessWidget {
     required this.onOpenICloudBackup,
     required this.onClearLocalContent,
     required this.onExportData,
-    required this.llmClient,
-    required this.iapService,
   });
 
   final UserProfile user;
@@ -33,8 +28,6 @@ class ProfilePage extends StatelessWidget {
   final VoidCallback onOpenICloudBackup;
   final Future<void> Function() onClearLocalContent;
   final Future<void> Function() onExportData;
-  final LLMClient llmClient;
-  final IAPService iapService;
 
   @override
   Widget build(BuildContext context) {
@@ -90,14 +83,6 @@ class ProfilePage extends StatelessWidget {
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   _SettingsTile(
-                    icon: Icons.workspace_premium,
-                    iconColor: AppColors.teal,
-                    title: '权益和额度',
-                    subtitle: '查看生成配额与订阅信息',
-                    onTap: () => _openEntitlements(context),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _SettingsTile(
                     icon: Icons.cloud_queue,
                     iconColor: AppColors.coral,
                     title: 'iCloud 同步',
@@ -124,17 +109,6 @@ class ProfilePage extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  void _openEntitlements(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => EntitlementsPage(
-          llmClient: llmClient,
-          iapService: iapService,
         ),
       ),
     );

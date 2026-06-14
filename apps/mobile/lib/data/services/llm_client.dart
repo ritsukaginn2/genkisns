@@ -5,25 +5,36 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:logger/logger.dart';
 
+import '../../models.dart';
+
 final Logger _logger = Logger();
 
 class LLMClient {
   /// Backend base URL. Override for local development with:
-  /// `flutter run --dart-define=GENKI_API_BASE=http://<mac-lan-ip>:8000`
+  /// `flutter run --dart-define=GENKI_API_BASE=http://<mac-lan-ip>:8787`
   /// (a physical iPhone cannot reach the Mac via `localhost`).
-  static const String _baseUrl = String.fromEnvironment(
+  static const String _configuredBaseUrl = String.fromEnvironment(
     'GENKI_API_BASE',
-    defaultValue: 'https://api.genki-sns.com',
+    defaultValue: '',
   );
   static const String _installationIdKey = 'genki_llm_installation_id';
   static const String _installationIdDevKey = 'genki_llm_installation_id_dev';
 
+  final String _baseUrl;
   late String _installationId;
   late SharedPreferences _prefs;
   final bool _isDevelopment;
   Future<void>? _initFuture;
+  InstallationStatusResponse? _latestInstallationStatus;
 
-  LLMClient({bool isDevelopment = false}) : _isDevelopment = isDevelopment;
+  LLMClient({bool isDevelopment = false, String? baseUrl})
+    : _isDevelopment = isDevelopment,
+      _baseUrl = baseUrl ?? _configuredBaseUrl;
+
+  bool get isBackendConfigured => _baseUrl.trim().isNotEmpty;
+
+  InstallationStatusResponse? get latestInstallationStatus =>
+      _latestInstallationStatus;
 
   /// Initialize the LLM client. Idempotent: safe to call from app startup and
   /// again lazily from any request method.
@@ -33,7 +44,9 @@ class LLMClient {
     try {
       _prefs = await SharedPreferences.getInstance();
       _installationId = await _getOrCreateInstallationId();
-      _logger.i('LLM Client initialized with installation_id: $_installationId');
+      _logger.i(
+        'LLM Client initialized with installation_id: $_installationId',
+      );
     } on Object {
       // Clear the cached future so a later call can retry.
       _initFuture = null;
@@ -44,17 +57,25 @@ class LLMClient {
   /// Get or create installation ID
   Future<String> _getOrCreateInstallationId() async {
     final key = _isDevelopment ? _installationIdDevKey : _installationIdKey;
-    var id = _prefs.getString(key);
+    final storedId = _prefs.getString(key);
+    var id = storedId ?? const Uuid().v4().replaceAll('-', '').substring(0, 32);
 
-    if (id == null) {
+    if (storedId == null) {
+      await _prefs.setString(key, id);
+      _logger.i('Created local installation ID: $id');
+    }
+
+    if (isBackendConfigured) {
       try {
-        id = await _registerInstallation();
-        await _prefs.setString(key, id);
-        _logger.i('Created new installation ID: $id');
+        final registered = await _registerInstallation(id);
+        final registeredId = registered.installationId;
+        if (registeredId != id) {
+          id = registeredId;
+          await _prefs.setString(key, id);
+        }
+        _latestInstallationStatus = registered;
       } catch (e) {
-        _logger.e('Failed to register installation: $e');
-        // Fallback: use temporary UUID (will try again next time)
-        id = const Uuid().v4().replaceAll('-', '').substring(0, 32);
+        _logger.w('Failed to refresh installation with backend: $e');
       }
     }
 
@@ -62,21 +83,26 @@ class LLMClient {
   }
 
   /// Register installation with backend
-  Future<String> _registerInstallation() async {
+  Future<InstallationStatusResponse> _registerInstallation(
+    String installationId,
+  ) async {
     try {
-      final response = await http.post(
-        Uri.parse('$_baseUrl/v1/installations'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'platform': 'ios',
-          'app_version': '1.0',
-          'device_model': 'iPhone',
-        }),
-      ).timeout(const Duration(seconds: 10));
+      final response = await http
+          .post(
+            _endpoint('/v1/installations'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'installation_id': installationId,
+              'platform': 'ios',
+              'app_version': '1.0',
+              'device_model': 'iPhone',
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return data['installation_id'] as String;
+        return InstallationStatusResponse.fromJson(data);
       } else {
         throw Exception('Failed to register: ${response.statusCode}');
       }
@@ -86,44 +112,86 @@ class LLMClient {
     }
   }
 
+  Future<InstallationStatusResponse> getInstallationStatus() async {
+    await init();
+    final response = await http
+        .get(
+          _endpoint('/v1/installations/me'),
+          headers: {'X-Installation-Id': _installationId},
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Failed to get installation status: ${response.statusCode}',
+      );
+    }
+    final status = InstallationStatusResponse.fromJson(
+      jsonDecode(response.body),
+    );
+    _latestInstallationStatus = status;
+    return status;
+  }
+
   /// Create LLM interaction job
   Future<InteractionJobResponse> createInteractionJob({
     required String postId,
     required String? text,
     required int imageCount,
-    required List<String> friendIds,
+    required bool hasVideo,
+    required int videoCount,
+    required List<AiFriend> friends,
     required String userName,
     required String? userBio,
   }) async {
     await init();
     try {
-      final response = await http.post(
-        Uri.parse('$_baseUrl/v1/interactions/jobs'),
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Installation-Id': _installationId,
-        },
-        body: jsonEncode({
-          'post_id': postId,
-          'text': text,
-          'image_count': imageCount,
-          'friend_ids': friendIds,
-          'user': {
-            'nickname': userName,
-            'bio': userBio ?? '',
-          },
-        }),
-      ).timeout(const Duration(seconds: 10));
+      final response = await http
+          .post(
+            _endpoint('/v1/interactions/jobs'),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Installation-Id': _installationId,
+            },
+            body: jsonEncode({
+              'post_id': postId,
+              'text': text,
+              'media': {
+                'image_count': imageCount,
+                'has_video': hasVideo,
+                'video_count': videoCount,
+              },
+              'friends': [
+                for (final friend in friends)
+                  {
+                    'id': friend.id,
+                    'name': friend.name,
+                    'relationship': friend.relationship,
+                    'personality': friend.personality,
+                    'speaking_style': friend.speakingStyle,
+                  },
+              ],
+              'user': {'nickname': userName, 'bio': userBio ?? ''},
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 202 || response.statusCode == 200) {
         final data = jsonDecode(response.body);
+        if (data['fallback_required'] == true || data['status'] == 'failed') {
+          throw BackendFallbackException(data['reason'] ?? 'fallback_required');
+        }
         return InteractionJobResponse.fromJson(data);
       } else if (response.statusCode == 402) {
         // Quota exceeded
-        throw QuotaExceededException(jsonDecode(response.body)['detail'] ?? 'Quota exceeded');
+        throw QuotaExceededException(
+          jsonDecode(response.body)['detail'] ?? 'Quota exceeded',
+        );
       } else if (response.statusCode == 429) {
         // Rate limited
-        throw RateLimitedException(jsonDecode(response.body)['detail'] ?? 'Rate limited');
+        throw RateLimitedException(
+          jsonDecode(response.body)['detail'] ?? 'Rate limited',
+        );
       } else {
         throw Exception('Failed to create job: ${response.statusCode}');
       }
@@ -145,12 +213,12 @@ class LLMClient {
     var delayMs = initialDelay.inMilliseconds;
 
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
-      final response = await http.get(
-        Uri.parse('$_baseUrl/v1/interactions/jobs/$jobId'),
-        headers: {
-          'X-Installation-Id': _installationId,
-        },
-      ).timeout(const Duration(seconds: 10));
+      final response = await http
+          .get(
+            _endpoint('/v1/interactions/jobs/$jobId'),
+            headers: {'X-Installation-Id': _installationId},
+          )
+          .timeout(const Duration(seconds: 10));
 
       if (response.statusCode != 200) {
         throw Exception('Failed to get job: ${response.statusCode}');
@@ -172,61 +240,52 @@ class LLMClient {
     return null; // Timeout
   }
 
-  /// Get current entitlements
-  Future<EntitlementResponse> getEntitlements() async {
-    await init();
-    try {
-      final response = await http.get(
-        Uri.parse('$_baseUrl/v1/entitlements'),
-        headers: {'X-Installation-Id': _installationId},
-      ).timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return EntitlementResponse.fromJson(data);
-      } else {
-        throw Exception('Failed to get entitlements: ${response.statusCode}');
-      }
-    } catch (e) {
-      _logger.e('Get entitlements error: $e');
-      rethrow;
-    }
-  }
-
-  /// Verify Apple IAP purchase
-  Future<EntitlementResponse> verifyPurchase({
-    required String receiptJws,
-    required String productId,
-  }) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$_baseUrl/v1/purchases/verify'),
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Installation-Id': _installationId,
-        },
-        body: jsonEncode({
-          'receipt_jws': receiptJws,
-          'product_id': productId,
-        }),
-      ).timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return EntitlementResponse.fromJson(data);
-      } else {
-        throw Exception('Purchase verification failed: ${response.statusCode}');
-      }
-    } catch (e) {
-      _logger.e('Verify purchase error: $e');
-      rethrow;
-    }
-  }
-
   String get installationId => _installationId;
+
+  Uri _endpoint(String path) {
+    final trimmed = _baseUrl.trim();
+    if (trimmed.isEmpty) {
+      throw BackendUnavailableException('GENKI_API_BASE is not configured');
+    }
+    final base = trimmed.endsWith('/')
+        ? trimmed.substring(0, trimmed.length - 1)
+        : trimmed;
+    return Uri.parse('$base$path');
+  }
 }
 
 // --- Models ---
+
+class InstallationStatusResponse {
+  final String installationId;
+  final String status;
+  final String? statusReason;
+  final bool backendAvailable;
+  final DateTime? updatedAt;
+
+  InstallationStatusResponse({
+    required this.installationId,
+    required this.status,
+    required this.backendAvailable,
+    this.statusReason,
+    this.updatedAt,
+  });
+
+  factory InstallationStatusResponse.fromJson(Map<String, dynamic> json) {
+    final updatedAt = json['updated_at'];
+    return InstallationStatusResponse(
+      installationId: json['installation_id'] as String,
+      status: json['status'] as String? ?? 'allowed',
+      statusReason: json['status_reason'] as String?,
+      backendAvailable: json['backend_available'] != false,
+      updatedAt: updatedAt is String ? DateTime.tryParse(updatedAt) : null,
+    );
+  }
+
+  bool get isAllowed => status == 'allowed';
+  bool get isLimited => status == 'limited';
+  bool get isBlocked => status == 'blocked';
+}
 
 enum JobStatus { queued, processing, completed, failed }
 
@@ -255,20 +314,25 @@ class InteractionJobDetailResponse {
   final JobStatus status;
   final JobResult? result;
   final String? reason;
+  final bool fallbackRequired;
 
   InteractionJobDetailResponse({
     required this.jobId,
     required this.status,
     this.result,
     this.reason,
+    this.fallbackRequired = false,
   });
 
   factory InteractionJobDetailResponse.fromJson(Map<String, dynamic> json) {
     return InteractionJobDetailResponse(
       jobId: json['job_id'],
       status: _parseJobStatus(json['status']),
-      result: json['result'] != null ? JobResult.fromJson(json['result']) : null,
+      result: json['result'] != null
+          ? JobResult.fromJson(json['result'])
+          : null,
       reason: json['reason'],
+      fallbackRequired: json['fallback_required'] == true,
     );
   }
 }
@@ -277,15 +341,13 @@ class JobResult {
   final int aiLikeCount;
   final List<CommentData> comments;
 
-  JobResult({
-    required this.aiLikeCount,
-    required this.comments,
-  });
+  JobResult({required this.aiLikeCount, required this.comments});
 
   factory JobResult.fromJson(Map<String, dynamic> json) {
     return JobResult(
       aiLikeCount: json['ai_like_count'] ?? 0,
-      comments: (json['comments'] as List<dynamic>?)
+      comments:
+          (json['comments'] as List<dynamic>?)
               ?.map((c) => CommentData.fromJson(c))
               .toList() ??
           [],
@@ -313,41 +375,6 @@ class CommentData {
   }
 }
 
-class EntitlementResponse {
-  final String installationId;
-  final String subscriptionStatus; // free | pro | trial
-  final int quotaRemaining;
-  final int quotaTotal;
-  final DateTime nextResetAt;
-  final DateTime? subscriptionExpiresAt;
-
-  EntitlementResponse({
-    required this.installationId,
-    required this.subscriptionStatus,
-    required this.quotaRemaining,
-    required this.quotaTotal,
-    required this.nextResetAt,
-    this.subscriptionExpiresAt,
-  });
-
-  factory EntitlementResponse.fromJson(Map<String, dynamic> json) {
-    return EntitlementResponse(
-      installationId: json['installation_id'],
-      subscriptionStatus: json['subscription_status'],
-      quotaRemaining: json['quota_remaining'] ?? 0,
-      quotaTotal: json['quota_total'] ?? 0,
-      nextResetAt: DateTime.parse(json['next_reset_at']),
-      subscriptionExpiresAt: json['subscription_expires_at'] != null
-          ? DateTime.parse(json['subscription_expires_at'])
-          : null,
-    );
-  }
-
-  bool get isPro => subscriptionStatus == 'pro';
-  bool get isFree => subscriptionStatus == 'free';
-  bool get hasQuota => quotaRemaining > 0;
-}
-
 JobStatus _parseJobStatus(String status) {
   return JobStatus.values.firstWhere(
     (s) => s.name == status,
@@ -368,6 +395,22 @@ class QuotaExceededException implements Exception {
 class RateLimitedException implements Exception {
   final String message;
   RateLimitedException(this.message);
+
+  @override
+  String toString() => message;
+}
+
+class BackendFallbackException implements Exception {
+  final String reason;
+  BackendFallbackException(this.reason);
+
+  @override
+  String toString() => reason;
+}
+
+class BackendUnavailableException implements Exception {
+  final String message;
+  BackendUnavailableException(this.message);
 
   @override
   String toString() => message;

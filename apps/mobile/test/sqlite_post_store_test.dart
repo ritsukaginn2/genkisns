@@ -1,8 +1,14 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:genki_sns/data/repositories/ai_friend_repository.dart';
+import 'package:genki_sns/data/repositories/post_repository.dart';
+import 'package:genki_sns/data/repositories/user_repository.dart';
+import 'package:genki_sns/data/services/interaction_service.dart';
+import 'package:genki_sns/data/services/llm_client.dart';
 import 'package:genki_sns/data/stores/sqlite_post_store.dart';
 import 'package:genki_sns/models.dart';
 import 'package:path/path.dart' as p;
@@ -17,9 +23,9 @@ void main() {
     // which needs a platform-channel mock in VM tests.
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-      const MethodChannel('plugins.flutter.io/path_provider'),
-      (call) async => Directory.systemTemp.path,
-    );
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          (call) async => Directory.systemTemp.path,
+        );
   });
 
   setUp(() async {
@@ -154,4 +160,100 @@ void main() {
 
     expect(await store.loadPosts(), isEmpty);
   });
+
+  test('persists background LLM upgrade to sqlite', () async {
+    final store = await SqlitePostStore.open();
+    final llmClient = _ControlledLlmClient();
+    final updateCompleter = Completer<Post>();
+    final repository = PostRepository(
+      store: store,
+      interactionService: InteractionService(llmClient: llmClient),
+      onPostUpdated: (post) {
+        if (!updateCompleter.isCompleted) updateCompleter.complete(post);
+      },
+    );
+    await repository.load();
+
+    final user = const UserRepository().getDefaultUser();
+    final friends = AiFriendRepository().listSelectedFriends();
+    final post = await repository.createPost(
+      const PostDraft(text: '需要真实回应。', images: []),
+      user: user,
+      friends: friends,
+    );
+
+    llmClient.complete();
+    final updated = await updateCompleter.future.timeout(
+      const Duration(seconds: 1),
+    );
+    expect(updated.id, post.id);
+    expect(updated.comments.single.content, '真实 LLM 评论。');
+    expect(updated.interactionStatus, InteractionStatus.success);
+
+    await repository.close();
+
+    final reopenedStore = await SqlitePostStore.open();
+    addTearDown(reopenedStore.close);
+    final posts = await reopenedStore.loadPosts();
+    expect(posts.single.id, post.id);
+    expect(posts.single.likeCount, 18);
+    expect(posts.single.comments.single.content, '真实 LLM 评论。');
+    expect(posts.single.interactionStatus, InteractionStatus.success);
+  });
+}
+
+class _ControlledLlmClient extends LLMClient {
+  _ControlledLlmClient() : super(isDevelopment: true);
+
+  final _resultReady = Completer<void>();
+
+  @override
+  bool get isBackendConfigured => true;
+
+  void complete() {
+    if (!_resultReady.isCompleted) _resultReady.complete();
+  }
+
+  @override
+  Future<void> init() async {}
+
+  @override
+  Future<InteractionJobResponse> createInteractionJob({
+    required String postId,
+    required String? text,
+    required int imageCount,
+    required bool hasVideo,
+    required int videoCount,
+    required List<AiFriend> friends,
+    required String userName,
+    required String? userBio,
+  }) async {
+    return InteractionJobResponse(
+      jobId: 'job_sqlite',
+      status: JobStatus.queued,
+    );
+  }
+
+  @override
+  Future<InteractionJobDetailResponse?> getJobResult(
+    String jobId, {
+    int maxAttempts = 30,
+    Duration initialDelay = const Duration(milliseconds: 500),
+  }) async {
+    await _resultReady.future;
+    return InteractionJobDetailResponse(
+      jobId: jobId,
+      status: JobStatus.completed,
+      result: JobResult(
+        aiLikeCount: 18,
+        comments: [
+          CommentData(
+            actorId: 'friend_mika',
+            content: '真实 LLM 评论。',
+            likeCount: 3,
+          ),
+        ],
+      ),
+    );
+  }
 }

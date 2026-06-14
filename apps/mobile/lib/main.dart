@@ -8,10 +8,10 @@ import 'data/repositories/ai_friend_repository.dart';
 import 'data/repositories/post_repository.dart';
 import 'data/repositories/user_repository.dart';
 import 'data/services/data_export_service.dart';
-import 'data/services/iap_service.dart';
 import 'data/services/icloud_backup_service.dart';
 import 'data/services/interaction_service.dart';
 import 'data/services/llm_client.dart';
+import 'data/services/media_storage.dart';
 import 'data/stores/post_store.dart';
 import 'data/stores/sqlite_post_store.dart';
 import 'design_preview/preview_routes.dart';
@@ -26,7 +26,11 @@ import 'pages/post_detail_page.dart';
 import 'pages/profile_page.dart';
 import 'theme/app_theme.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Cache the documents root so media (stored as relative paths) can be
+  // resolved synchronously during widget builds.
+  await MediaStorage.init();
   runApp(const GenkiSnsApp());
 }
 
@@ -48,7 +52,6 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
   final iCloudBackupService = const ICloudBackupService();
   final dataExportService = const DataExportService();
   final llmClient = LLMClient();
-  late final IAPService iapService;
   PostRepository? postRepository;
   Timer? iCloudBackupDebounce;
   Object? loadError;
@@ -58,7 +61,6 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
     super.initState();
     userRepository = const UserRepository();
     aiFriendRepository = AiFriendRepository();
-    iapService = IAPService(llmClient: llmClient);
     _initializeDataLayer();
   }
 
@@ -66,7 +68,6 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
   void dispose() {
     iCloudBackupDebounce?.cancel();
     postRepository?.close();
-    iapService.dispose();
     super.dispose();
   }
 
@@ -110,14 +111,9 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
   }
 
   Future<void> _initBackendServices() async {
-    await Future.wait([
-      llmClient.init().catchError((Object e) {
-        debugPrint('LLM client init failed: $e');
-      }),
-      iapService.init().catchError((Object e) {
-        debugPrint('IAP init failed: $e');
-      }),
-    ]);
+    await llmClient.init().catchError((Object e) {
+      debugPrint('LLM client init failed: $e');
+    });
   }
 
   @override
@@ -145,8 +141,6 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
                 onSetICloudSyncEnabled: _setICloudSyncEnabled,
                 onClearLocalContent: _clearLocalContent,
                 onExportData: _exportData,
-                llmClient: llmClient,
-                iapService: iapService,
               ));
 
     return MaterialApp(
@@ -373,8 +367,6 @@ class GenkiShell extends StatefulWidget {
     required this.onSetICloudSyncEnabled,
     required this.onClearLocalContent,
     required this.onExportData,
-    required this.llmClient,
-    required this.iapService,
   });
 
   final UserProfile user;
@@ -393,8 +385,6 @@ class GenkiShell extends StatefulWidget {
   final Future<ICloudBackupStatus> Function(bool enabled) onSetICloudSyncEnabled;
   final Future<void> Function() onClearLocalContent;
   final Future<void> Function() onExportData;
-  final LLMClient llmClient;
-  final IAPService iapService;
 
   @override
   State<GenkiShell> createState() => _GenkiShellState();
@@ -457,8 +447,6 @@ class _GenkiShellState extends State<GenkiShell> {
           onOpenICloudBackup: _openICloudBackup,
           onClearLocalContent: widget.onClearLocalContent,
           onExportData: widget.onExportData,
-          llmClient: widget.llmClient,
-          iapService: widget.iapService,
         ),
       ),
     );

@@ -21,3 +21,6 @@ build/
 *.swo
 # Claude Code session files
 .claude/scheduled_tasks.lock
+
+# llm-proxy runtime store (installations/jobs)
+services/llm-proxy/data/

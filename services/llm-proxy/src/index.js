@@ -2,6 +2,15 @@ import { loadConfig } from './config.js';
 import { createApp } from './http.js';
 import { JsonFileStore } from './store.js';
 
+// Load a local .env (gitignored) into process.env if present, so secrets like
+// the LLM API key live in a file instead of the command line. No-op when the
+// file is missing — the ambient environment still wins.
+try {
+  process.loadEnvFile();
+} catch {
+  // No .env file; rely on the ambient environment.
+}
+
 const config = loadConfig();
 const store = new JsonFileStore(config.dataFile);
 const app = await createApp({ config, store });

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:genki_sns/data/services/interaction_service.dart';
 import 'package:genki_sns/data/stores/post_store.dart';
 import 'package:genki_sns/main.dart';
 import 'package:genki_sns/mock/mock_data.dart';
@@ -175,7 +176,15 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      GenkiSnsApp(postStoreFactory: () async => MemoryPostStore()),
+      GenkiSnsApp(
+        postStoreFactory: () async => MemoryPostStore(),
+        // Deliver AI interactions immediately (no stagger) so the detail page
+        // has comments to interact with.
+        interactionService: InteractionService(
+          firstDelaySeconds: 0,
+          gapSeconds: 0,
+        ),
+      ),
     );
     await tester.pumpAndSettle();
 

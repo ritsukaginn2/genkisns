@@ -36,7 +36,7 @@ class SqlitePostStore implements PostStore {
   static Future<Database> _openAt(String path) {
     return openDatabase(
       path,
-      version: 3,
+      version: 4,
       onConfigure: _onConfigure,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
@@ -111,6 +111,7 @@ class SqlitePostStore implements PostStore {
         created_at INTEGER NOT NULL,
         like_count INTEGER NOT NULL,
         user_liked INTEGER NOT NULL,
+        deliver_at INTEGER,
         PRIMARY KEY (post_id, id),
         FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
       )
@@ -146,6 +147,9 @@ class SqlitePostStore implements PostStore {
     if (oldVersion < 3) {
       await db.execute('ALTER TABLE post_images ADD COLUMN width INTEGER');
       await db.execute('ALTER TABLE post_images ADD COLUMN height INTEGER');
+    }
+    if (oldVersion < 4) {
+      await db.execute('ALTER TABLE comments ADD COLUMN deliver_at INTEGER');
     }
   }
 
@@ -280,6 +284,9 @@ class SqlitePostStore implements PostStore {
           ),
           likeCount: row['like_count'] as int,
           userLiked: (row['user_liked'] as int) == 1,
+          deliverAt: row['deliver_at'] != null
+              ? DateTime.fromMillisecondsSinceEpoch(row['deliver_at'] as int)
+              : null,
           replies: await _loadReplies(postId: postId, commentId: commentId),
         ),
       );
@@ -352,6 +359,7 @@ class SqlitePostStore implements PostStore {
       'created_at': comment.createdAt.millisecondsSinceEpoch,
       'like_count': comment.likeCount,
       'user_liked': comment.userLiked ? 1 : 0,
+      'deliver_at': comment.deliverAt?.millisecondsSinceEpoch,
     };
   }
 

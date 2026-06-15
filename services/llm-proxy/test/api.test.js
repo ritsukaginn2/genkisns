@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import { loadConfig } from '../src/config.js';
 import { createApp } from '../src/http.js';
+import { assignDeliveryDelays } from '../src/queue.js';
 import { buildInteractionRequest } from '../src/request.js';
 import { JsonFileStore } from '../src/store.js';
 
@@ -654,6 +655,61 @@ test('stale queued/processing jobs are failed on restart', async () => {
     await app.queue.onIdle();
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('assignDeliveryDelays staggers comments and caps the max', () => {
+  const config = loadConfig({
+    COMMENT_FIRST_DELAY_SECONDS: '4',
+    COMMENT_DELAY_GAP_SECONDS: '18',
+    COMMENT_MAX_DELAY_SECONDS: '30',
+  });
+  const comments = [{}, {}, {}];
+  assignDeliveryDelays(comments, config);
+  assert.deepEqual(
+    comments.map((c) => c.delay_seconds),
+    [4, 22, 30], // 4, 4+18=22, 4+36=40 -> capped at 30
+  );
+});
+
+test('completed job comments carry staggered delay_seconds', async () => {
+  const app = await startTestApp();
+  try {
+    const installationId = 'delay_installation_1234';
+    await jsonRequest(app.baseUrl, '/v1/installations', {
+      method: 'POST',
+      body: { installation_id: installationId, platform: 'ios' },
+    });
+
+    const created = await jsonRequest(app.baseUrl, '/v1/interactions/jobs', {
+      method: 'POST',
+      headers: { 'X-Installation-Id': installationId },
+      body: validJobBody({
+        friends: [
+          { id: 'friend_mika', name: '美香' },
+          { id: 'friend_sen', name: '森' },
+          { id: 'friend_aki', name: 'Aki' },
+        ],
+      }),
+    });
+    assert.equal(created.response.status, 202);
+
+    let detail;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      detail = await jsonRequest(app.baseUrl, `/v1/interactions/jobs/${created.json.job_id}`, {
+        headers: { 'X-Installation-Id': installationId },
+      });
+      if (detail.json.status === 'completed') break;
+      await delay(25);
+    }
+    assert.equal(detail.json.status, 'completed');
+    const delays = detail.json.result.comments.map((c) => c.delay_seconds);
+    assert.equal(delays[0], 4);
+    for (let i = 1; i < delays.length; i += 1) {
+      assert.ok(delays[i] > delays[i - 1], 'delays must increase');
+    }
+  } finally {
+    await app.close();
   }
 });
 

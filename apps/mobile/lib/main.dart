@@ -37,9 +37,13 @@ void main() async {
 typedef PostStoreFactory = Future<PostStore> Function();
 
 class GenkiSnsApp extends StatefulWidget {
-  const GenkiSnsApp({super.key, this.postStoreFactory});
+  const GenkiSnsApp({super.key, this.postStoreFactory, this.interactionService});
 
   final PostStoreFactory? postStoreFactory;
+
+  /// Test override for the interaction service (e.g. to disable staggered
+  /// delivery delays). Production uses the real LLM-backed service.
+  final InteractionService? interactionService;
 
   @override
   State<GenkiSnsApp> createState() => _GenkiSnsAppState();
@@ -87,7 +91,8 @@ class _GenkiSnsAppState extends State<GenkiSnsApp> {
       final storeFactory = widget.postStoreFactory ?? _defaultPostStoreFactory;
       final store = await storeFactory();
       final repository = PostRepository(
-        interactionService: InteractionService(llmClient: llmClient),
+        interactionService:
+            widget.interactionService ?? InteractionService(llmClient: llmClient),
         store: store,
         onPostUpdated: (_) {
           if (mounted) setState(() {});

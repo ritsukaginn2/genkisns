@@ -11,8 +11,15 @@ import 'package:genki_sns/data/services/llm_client.dart';
 import 'package:genki_sns/models.dart';
 
 void main() {
-  test('creates an image-only post through repository', () async {
-    final repository = PostRepository(interactionService: InteractionService());
+  test('creates an image-only post; AI interactions arrive in background', () async {
+    final delivered = Completer<Post>();
+    final repository = PostRepository(
+      interactionService: InteractionService(firstDelaySeconds: 0, gapSeconds: 0),
+      onPostUpdated: (p) {
+        if (!delivered.isCompleted) delivered.complete(p);
+      },
+    );
+    addTearDown(repository.close);
     final friends = AiFriendRepository().listSelectedFriends();
 
     final post = await repository.createPost(
@@ -26,13 +33,24 @@ void main() {
 
     expect(post.text, isEmpty);
     expect(post.imageColors, [Colors.pink]);
-    expect(post.comments, isNotEmpty);
+    // No instant fake comments at publish — they arrive (staggered) afterwards.
+    expect(post.comments, isEmpty);
     expect(post.interactionStatus, InteractionStatus.success);
-    expect(repository.listPosts(), [post]);
+
+    final updated = await delivered.future.timeout(const Duration(seconds: 1));
+    expect(updated.comments, isNotEmpty);
+    expect(repository.listPosts().single.id, post.id);
   });
 
   test('creates a video-only post through repository', () async {
-    final repository = PostRepository(interactionService: InteractionService());
+    final delivered = Completer<Post>();
+    final repository = PostRepository(
+      interactionService: InteractionService(firstDelaySeconds: 0, gapSeconds: 0),
+      onPostUpdated: (p) {
+        if (!delivered.isCompleted) delivered.complete(p);
+      },
+    );
+    addTearDown(repository.close);
     final friends = AiFriendRepository().listSelectedFriends();
 
     final post = await repository.createPost(
@@ -56,8 +74,11 @@ void main() {
 
     expect(post.text, isEmpty);
     expect(post.hasVideo, isTrue);
-    expect(post.comments, isNotEmpty);
-    expect(repository.listPosts(), [post]);
+    expect(post.comments, isEmpty);
+
+    final updated = await delivered.future.timeout(const Duration(seconds: 1));
+    expect(updated.comments, isNotEmpty);
+    expect(repository.listPosts().single.id, post.id);
   });
 
   test('rejects empty post drafts', () async {
@@ -76,17 +97,24 @@ void main() {
   test(
     'persists post likes, comment likes, replies and reply deletion',
     () async {
+      final delivered = Completer<Post>();
       final repository = PostRepository(
-        interactionService: InteractionService(),
+        interactionService: InteractionService(firstDelaySeconds: 0, gapSeconds: 0),
+        onPostUpdated: (p) {
+          if (!delivered.isCompleted) delivered.complete(p);
+        },
       );
+      addTearDown(repository.close);
       final user = const UserRepository().getDefaultUser();
       final friends = AiFriendRepository().listSelectedFriends();
 
-      final post = await repository.createPost(
+      await repository.createPost(
         const PostDraft(text: '需要一点回应。', images: []),
         user: user,
         friends: friends,
       );
+      final post = await delivered.future.timeout(const Duration(seconds: 1));
+      expect(post.comments, isNotEmpty);
       final commentId = post.comments.first.id;
 
       final likedPost = await repository.togglePostLike(post.id);
@@ -226,98 +254,95 @@ void main() {
     expect(await thumbnailFile.exists(), isFalse);
   });
 
-  test('LLM upgrade preserves local comment likes and replies', () async {
+  test('LLM interaction is delivered and supports like and reply', () async {
     final llmClient = _ControlledLlmClient();
     final updateCompleter = Completer<Post>();
     final repository = PostRepository(
-      interactionService: InteractionService(llmClient: llmClient),
+      interactionService: InteractionService(
+        llmClient: llmClient,
+        firstDelaySeconds: 0,
+        gapSeconds: 0,
+      ),
       onPostUpdated: (post) {
         if (!updateCompleter.isCompleted) updateCompleter.complete(post);
       },
     );
+    addTearDown(repository.close);
     final user = const UserRepository().getDefaultUser();
     final friends = AiFriendRepository().listSelectedFriends();
 
-    final post = await repository.createPost(
+    await repository.createPost(
       const PostDraft(text: '等待真实回应。', images: []),
       user: user,
       friends: friends,
     );
-    final originalComment = post.comments.first;
-    await repository.toggleCommentLike(
-      postId: post.id,
-      commentId: originalComment.id,
-    );
-    await repository.addLocalReply(
-      postId: post.id,
-      commentId: originalComment.id,
-      user: user,
-      content: '这是本地回复。',
-    );
-
     llmClient.complete();
     final updated = await updateCompleter.future.timeout(
       const Duration(seconds: 1),
     );
 
-    expect(updated.comments.first.content, '真实 LLM 评论。');
-    expect(updated.comments.first.postId, post.id);
-    expect(updated.comments.first.userLiked, isTrue);
-    expect(updated.comments.first.likeCount, 4);
-    expect(updated.comments.first.replies.single.content, '这是本地回复。');
-    expect(
-      updated.comments.first.replies.single.commentId,
-      updated.comments.first.id,
+    final comment = updated.comments.firstWhere(
+      (c) => c.actorId == 'friend_mika',
     );
+    expect(comment.content, '真实 LLM 评论。');
+    expect(comment.postId, updated.id);
+
+    final liked = await repository.toggleCommentLike(
+      postId: updated.id,
+      commentId: comment.id,
+    );
+    final likedComment = liked.comments.firstWhere((c) => c.id == comment.id);
+    expect(likedComment.userLiked, isTrue);
+    expect(likedComment.likeCount, comment.likeCount + 1);
+
+    final replied = await repository.addLocalReply(
+      postId: updated.id,
+      commentId: comment.id,
+      user: user,
+      content: '这是本地回复。',
+    );
+    final repliedComment = replied.comments.firstWhere((c) => c.id == comment.id);
+    expect(repliedComment.replies.single.content, '这是本地回复。');
+    expect(repliedComment.replies.single.commentId, comment.id);
+    expect(repliedComment.userLiked, isTrue); // like preserved across reply
   });
 
-  test(
-    'LLM upgrade keeps replies when the same actor returns multiple comments',
-    () async {
-      final llmClient = _MultiCommentLlmClient();
-      final updateCompleter = Completer<Post>();
-      final repository = PostRepository(
-        interactionService: InteractionService(llmClient: llmClient),
-        onPostUpdated: (post) {
-          if (!updateCompleter.isCompleted) updateCompleter.complete(post);
-        },
-      );
-      final user = const UserRepository().getDefaultUser();
-      final friends = AiFriendRepository().listSelectedFriends();
+  test('all LLM comments are delivered even from the same actor', () async {
+    final llmClient = _MultiCommentLlmClient();
+    final updateCompleter = Completer<Post>();
+    final repository = PostRepository(
+      interactionService: InteractionService(
+        llmClient: llmClient,
+        firstDelaySeconds: 0,
+        gapSeconds: 0,
+      ),
+      onPostUpdated: (post) {
+        if (!updateCompleter.isCompleted) updateCompleter.complete(post);
+      },
+    );
+    addTearDown(repository.close);
+    final user = const UserRepository().getDefaultUser();
+    final friends = AiFriendRepository().listSelectedFriends();
 
-      final post = await repository.createPost(
-        const PostDraft(text: '等待多条回应。', images: []),
-        user: user,
-        friends: friends,
-      );
-      final mikaComment = post.comments.firstWhere(
-        (comment) => comment.actorId == 'friend_mika',
-      );
-      await repository.addLocalReply(
-        postId: post.id,
-        commentId: mikaComment.id,
-        user: user,
-        content: '挂在第一条上的回复。',
-      );
+    await repository.createPost(
+      const PostDraft(text: '等待多条回应。', images: []),
+      user: user,
+      friends: friends,
+    );
+    llmClient.complete();
+    final updated = await updateCompleter.future.timeout(
+      const Duration(seconds: 1),
+    );
 
-      llmClient.complete();
-      final updated = await updateCompleter.future.timeout(
-        const Duration(seconds: 1),
-      );
-
-      final mikaComments = updated.comments
-          .where((comment) => comment.actorId == 'friend_mika')
-          .toList();
-      expect(mikaComments, hasLength(2));
-      expect(mikaComments.first.content, '第一条真实评论。');
-      expect(mikaComments.first.replies.single.content, '挂在第一条上的回复。');
-      expect(
-        mikaComments.first.replies.single.commentId,
-        mikaComments.first.id,
-      );
-      expect(mikaComments[1].replies, isEmpty);
-    },
-  );
+    final mika = updated.comments
+        .where((comment) => comment.actorId == 'friend_mika')
+        .toList();
+    expect(mika, hasLength(2));
+    expect(
+      mika.map((c) => c.content),
+      containsAll(['第一条真实评论。', '第二条真实评论。']),
+    );
+  });
 
   test('tryGenerateWithLlm returns null when polling times out', () async {
     final service = InteractionService(llmClient: _TimeoutLlmClient());

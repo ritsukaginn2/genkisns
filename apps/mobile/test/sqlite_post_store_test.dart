@@ -167,7 +167,11 @@ void main() {
     final updateCompleter = Completer<Post>();
     final repository = PostRepository(
       store: store,
-      interactionService: InteractionService(llmClient: llmClient),
+      interactionService: InteractionService(
+        llmClient: llmClient,
+        firstDelaySeconds: 0,
+        gapSeconds: 0,
+      ),
       onPostUpdated: (post) {
         if (!updateCompleter.isCompleted) updateCompleter.complete(post);
       },

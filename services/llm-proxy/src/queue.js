@@ -2,6 +2,19 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { validateJobResult } from './resultValidation.js';
 
+// Assign a staggered delivery delay to each comment so the client reveals them
+// gradually (real-person pacing) instead of all at once. delay[i] grows linearly
+// and is capped, all driven by config so the pacing is tunable.
+export function assignDeliveryDelays(comments, config) {
+  const first = config.commentFirstDelaySeconds ?? 4;
+  const gap = config.commentDelayGapSeconds ?? 18;
+  const max = config.commentMaxDelaySeconds ?? 600;
+  comments.forEach((comment, index) => {
+    comment.delay_seconds = Math.min(max, first + index * gap);
+  });
+  return comments;
+}
+
 export class JobQueue {
   constructor({ store, provider, config }) {
     this.store = store;
@@ -71,6 +84,7 @@ export class JobQueue {
         maxComments: this.config.maxComments,
         maxCommentLength: this.config.maxCommentLength,
       });
+      assignDeliveryDelays(result.comments, this.config);
       await this.store.updateJob(jobId, {
         status: 'completed',
         result,

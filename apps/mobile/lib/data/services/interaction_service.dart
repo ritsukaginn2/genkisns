@@ -20,7 +20,29 @@ class InteractionResult {
 class InteractionService {
   final LLMClient? llmClient;
 
-  InteractionService({this.llmClient});
+  /// Client-side default pacing, used when the backend doesn't supply
+  /// delay_seconds (e.g. local fallback templates). Mirrors the backend
+  /// defaults; injectable so tests can disable staggering (set both to 0).
+  final int firstDelaySeconds;
+  final int gapSeconds;
+
+  InteractionService({
+    this.llmClient,
+    this.firstDelaySeconds = 4,
+    this.gapSeconds = 18,
+  });
+
+  static const int _maxDelaySeconds = 600;
+
+  DateTime _deliverAtFor({
+    required DateTime now,
+    required int index,
+    int? backendDelaySeconds,
+  }) {
+    final seconds =
+        backendDelaySeconds ?? (firstDelaySeconds + index * gapSeconds);
+    return now.add(Duration(seconds: seconds.clamp(0, _maxDelaySeconds)));
+  }
 
   /// V1 primary path: local template interactions, generated synchronously so
   /// publishing never waits on the network.
@@ -113,9 +135,10 @@ class InteractionService {
         );
         continue;
       }
+      final index = comments.length;
       comments.add(
         Comment(
-          id: 'c_${now.millisecondsSinceEpoch}_${comments.length}',
+          id: 'c_${now.millisecondsSinceEpoch}_$index',
           postId: post.id,
           actorId: friend.id,
           actorNameSnapshot: friend.name,
@@ -125,6 +148,11 @@ class InteractionService {
           createdAt: now,
           likeCount: commentData.likeCount,
           replies: const [],
+          deliverAt: _deliverAtFor(
+            now: now,
+            index: index,
+            backendDelaySeconds: commentData.delaySeconds,
+          ),
         ),
       );
     }
@@ -152,17 +180,23 @@ class InteractionService {
     return null;
   }
 
-  /// Fall back to template-based generation (local, fast)
+  /// Fall back to template-based generation (local). Still staggered via
+  /// [Comment.deliverAt] so even the offline path trickles in instead of
+  /// dumping every comment at once.
   InteractionResult _fallback({
     required PostSeed post,
     required List<AiFriend> friends,
     required DateTime now,
   }) {
-    final comments = generateTemplateComments(
+    final base = generateTemplateComments(
       post: post,
       friends: friends.isEmpty ? presetFriends.take(1).toList() : friends,
       now: now,
     );
+    final comments = [
+      for (var i = 0; i < base.length; i++)
+        base[i].copyWith(deliverAt: _deliverAtFor(now: now, index: i)),
+    ];
     return InteractionResult(
       likeCount: comments.length + 8,
       comments: comments,

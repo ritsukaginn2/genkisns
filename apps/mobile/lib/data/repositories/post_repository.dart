@@ -20,24 +20,86 @@ class PostRepository {
   /// background LLM upgrade replaces template interactions).
   final void Function(Post post)? onPostUpdated;
 
+  // _posts holds the FULL posts, including AI comments whose deliverAt is still
+  // in the future. Callers always receive a "view" (_view) that exposes only
+  // already-delivered comments, so the UI reveals them gradually.
   final List<Post> _posts = [];
 
-  List<Post> listPosts() => List.unmodifiable(_posts);
+  // Pending-comment reveal timers, keyed by post id.
+  final Map<String, List<Timer>> _revealTimers = {};
+
+  List<Post> listPosts() =>
+      List.unmodifiable([for (final post in _posts) _view(post)]);
 
   Future<void> load() async {
     final storedPosts = await store.loadPosts();
     _posts
       ..clear()
       ..addAll(storedPosts);
+    for (final post in _posts) {
+      _scheduleReveals(post);
+    }
   }
 
-  Future<void> close() => store.close();
+  Future<void> close() {
+    _cancelAllReveals();
+    return store.close();
+  }
 
   Future<void> prepareForBackup() => store.prepareForBackup();
 
-  Post getPost(String postId) {
-    final index = _postIndex(postId);
-    return _posts[index];
+  /// Public accessor: returns the delivered-only view of a post.
+  Post getPost(String postId) => _view(_fullPost(postId));
+
+  Post _fullPost(String postId) => _posts[_postIndex(postId)];
+
+  /// Projects a stored post to what the user should currently see: only AI
+  /// comments whose scheduled [Comment.deliverAt] has arrived.
+  Post _view(Post full) {
+    final now = DateTime.now();
+    final delivered = [
+      for (final comment in full.comments)
+        if (comment.isDeliveredAt(now)) comment,
+    ];
+    if (delivered.length == full.comments.length) return full;
+    return full.copyWith(comments: delivered);
+  }
+
+  void _scheduleReveals(Post post) {
+    _cancelReveals(post.id);
+    final now = DateTime.now();
+    final timers = <Timer>[];
+    for (final comment in post.comments) {
+      final at = comment.deliverAt;
+      if (at != null && at.isAfter(now)) {
+        timers.add(Timer(at.difference(now), () => _revealDue(post.id)));
+      }
+    }
+    if (timers.isNotEmpty) _revealTimers[post.id] = timers;
+  }
+
+  void _revealDue(String postId) {
+    final index = _posts.indexWhere((post) => post.id == postId);
+    if (index == -1) return;
+    onPostUpdated?.call(_view(_posts[index]));
+  }
+
+  void _cancelReveals(String postId) {
+    final timers = _revealTimers.remove(postId);
+    if (timers != null) {
+      for (final timer in timers) {
+        timer.cancel();
+      }
+    }
+  }
+
+  void _cancelAllReveals() {
+    for (final timers in _revealTimers.values) {
+      for (final timer in timers) {
+        timer.cancel();
+      }
+    }
+    _revealTimers.clear();
   }
 
   Future<Post> createPost(
@@ -55,53 +117,51 @@ class PostRepository {
       text: draft.text.trim(),
       images: List.unmodifiable(draft.images),
     );
-    // V1: local template interactions, generated synchronously — publishing
-    // never waits on the network.
-    final interactions = interactionService.generateLocalInteractions(
-      post: seed,
-      friends: friends,
-      now: now,
-    );
+    // Local-first: the post is saved instantly with NO AI interactions yet.
+    // AI likes/comments are generated and then revealed gradually in the
+    // background (real-person pacing) — no instant fake templates, no swap.
     final post = Post(
       id: seed.id,
       text: seed.text,
       images: seed.images,
       createdAt: now,
-      likeCount: interactions.likeCount,
-      comments: interactions.comments,
+      likeCount: 0,
+      comments: const [],
       interactionStatus: InteractionStatus.success,
     );
 
     _posts.insert(0, post);
     await store.upsertPost(post);
 
-    // V1.6: upgrade to real LLM interactions in the background when available.
     unawaited(
-      _upgradeInteractionsWithLlm(
-        seed: seed,
-        user: user,
-        friends: friends,
-        now: now,
-      ),
+      _generateAndScheduleInteractions(seed: seed, user: user, friends: friends),
     );
-    return post;
+    return _view(post);
   }
 
-  Future<void> _upgradeInteractionsWithLlm({
+  /// Generates AI interactions (real LLM, or local template fallback) and
+  /// schedules their staggered reveal. Comments carry [Comment.deliverAt] so the
+  /// UI shows them one by one over time instead of all at once.
+  Future<void> _generateAndScheduleInteractions({
     required PostSeed seed,
     required UserProfile user,
     required List<AiFriend> friends,
-    required DateTime now,
   }) async {
-    final result = await interactionService.tryGenerateWithLlm(
-      post: seed,
-      user: user,
-      friends: friends,
-      now: now,
-    );
-    if (result == null) return;
+    final now = DateTime.now();
+    final result =
+        await interactionService.tryGenerateWithLlm(
+          post: seed,
+          user: user,
+          friends: friends,
+          now: now,
+        ) ??
+        interactionService.generateLocalInteractions(
+          post: seed,
+          friends: friends,
+          now: now,
+        );
 
-    // The post may have been deleted or liked while the LLM was working.
+    // The post may have been deleted while generation was in flight.
     final index = _posts.indexWhere((post) => post.id == seed.id);
     if (index == -1) return;
     final current = _posts[index];
@@ -118,7 +178,8 @@ class PostRepository {
           : InteractionStatus.success,
     );
     await _replacePost(updated);
-    onPostUpdated?.call(updated);
+    _scheduleReveals(updated);
+    onPostUpdated?.call(_view(updated));
   }
 
   List<Comment> _mergeLlmComments({
@@ -207,7 +268,7 @@ class PostRepository {
   }
 
   Future<Post> togglePostLike(String postId) {
-    final post = getPost(postId);
+    final post = _fullPost(postId);
     final nextLiked = !post.userLiked;
     final nextLikeCount = nextLiked
         ? post.likeCount + 1
@@ -222,7 +283,7 @@ class PostRepository {
     required String postId,
     required String commentId,
   }) {
-    final post = getPost(postId);
+    final post = _fullPost(postId);
     final updatedComments = [
       for (final comment in post.comments)
         if (comment.id == commentId)
@@ -245,7 +306,7 @@ class PostRepository {
       throw ArgumentError('Local reply content must not be empty.');
     }
 
-    final post = getPost(postId);
+    final post = _fullPost(postId);
     final updatedComments = [
       for (final comment in post.comments)
         if (comment.id == commentId)
@@ -275,7 +336,7 @@ class PostRepository {
     required String commentId,
     required String replyId,
   }) {
-    final post = getPost(postId);
+    final post = _fullPost(postId);
     final updatedComments = [
       for (final comment in post.comments)
         if (comment.id == commentId)
@@ -293,6 +354,7 @@ class PostRepository {
   }
 
   Future<void> deletePost(String postId) async {
+    _cancelReveals(postId);
     final index = _postIndex(postId);
     final post = _posts.removeAt(index);
     await store.deletePost(postId);
@@ -302,6 +364,7 @@ class PostRepository {
   /// Removes every post and its media from the local store. Does not touch any
   /// iCloud backup.
   Future<void> clearAllPosts() async {
+    _cancelAllReveals();
     final removed = List<Post>.from(_posts);
     _posts.clear();
     await store.deleteAllPosts();
@@ -323,7 +386,7 @@ class PostRepository {
     final index = _postIndex(updatedPost.id);
     _posts[index] = updatedPost;
     await store.upsertPost(updatedPost);
-    return updatedPost;
+    return _view(updatedPost);
   }
 
   int _postIndex(String postId) {

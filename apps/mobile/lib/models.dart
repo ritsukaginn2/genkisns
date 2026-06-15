@@ -246,6 +246,7 @@ class Comment {
     this.likeCount = 12,
     this.userLiked = false,
     this.replies = const [],
+    this.deliverAt,
   });
 
   final String id;
@@ -260,6 +261,15 @@ class Comment {
   final bool userLiked;
   final List<LocalReply> replies;
 
+  /// When this AI comment should become visible to the user. Null means it is
+  /// already delivered (legacy data or immediate). Used for staggered, real-
+  /// person-paced delivery so comments trickle in instead of appearing at once.
+  final DateTime? deliverAt;
+
+  /// True once [now] has reached this comment's scheduled delivery time.
+  bool isDeliveredAt(DateTime now) =>
+      deliverAt == null || !deliverAt!.isAfter(now);
+
   Comment copyWith({
     String? id,
     String? postId,
@@ -272,6 +282,7 @@ class Comment {
     int? likeCount,
     bool? userLiked,
     List<LocalReply>? replies,
+    DateTime? deliverAt,
   }) {
     return Comment(
       id: id ?? this.id,
@@ -285,6 +296,7 @@ class Comment {
       likeCount: likeCount ?? this.likeCount,
       userLiked: userLiked ?? this.userLiked,
       replies: replies ?? this.replies,
+      deliverAt: deliverAt ?? this.deliverAt,
     );
   }
 
@@ -303,7 +315,8 @@ class Comment {
           createdAt == other.createdAt &&
           likeCount == other.likeCount &&
           userLiked == other.userLiked &&
-          listEquals(replies, other.replies);
+          listEquals(replies, other.replies) &&
+          deliverAt == other.deliverAt;
 
   @override
   int get hashCode =>
@@ -317,7 +330,8 @@ class Comment {
       createdAt.hashCode ^
       likeCount.hashCode ^
       userLiked.hashCode ^
-      replies.hashCode;
+      replies.hashCode ^
+      deliverAt.hashCode;
 }
 
 @immutable

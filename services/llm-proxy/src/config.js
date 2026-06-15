@@ -66,6 +66,12 @@ export function loadConfig(env = process.env) {
     maxComments: parseInteger(env, 'MAX_COMMENTS', 5, { min: 1 }),
     maxCommentLength: parseInteger(env, 'MAX_COMMENT_LENGTH', 160, { min: 1 }),
     maxFriends: parseInteger(env, 'MAX_FRIENDS', 12, { min: 1 }),
+    // Staggered delivery pacing: each comment gets a delay_seconds so the client
+    // reveals them gradually (real-person feel) instead of dumping them at once.
+    // delay[i] = firstDelay + i*gap, capped at maxDelay. All tunable via env.
+    commentFirstDelaySeconds: parseInteger(env, 'COMMENT_FIRST_DELAY_SECONDS', 4, { min: 0 }),
+    commentDelayGapSeconds: parseInteger(env, 'COMMENT_DELAY_GAP_SECONDS', 18, { min: 0 }),
+    commentMaxDelaySeconds: parseInteger(env, 'COMMENT_MAX_DELAY_SECONDS', 600, { min: 1 }),
     safetyBlocklist: parseList(env.SAFETY_BLOCKLIST, DEFAULT_BLOCKLIST),
   };
 }

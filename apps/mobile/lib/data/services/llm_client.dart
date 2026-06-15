@@ -360,17 +360,24 @@ class CommentData {
   final String content;
   final int likeCount;
 
+  /// Seconds after job creation when this comment should be revealed, so the
+  /// client can stagger delivery for a real-person feel. Null when absent.
+  final int? delaySeconds;
+
   CommentData({
     required this.actorId,
     required this.content,
     required this.likeCount,
+    this.delaySeconds,
   });
 
   factory CommentData.fromJson(Map<String, dynamic> json) {
+    final rawDelay = json['delay_seconds'];
     return CommentData(
       actorId: json['actor_id'],
       content: json['content'],
       likeCount: json['like_count'] ?? 0,
+      delaySeconds: rawDelay is num ? rawDelay.toInt() : null,
     );
   }
 }

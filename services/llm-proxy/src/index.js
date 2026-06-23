@@ -31,7 +31,7 @@ server.listen(config.port, config.host, () => {
     port: config.port,
     provider: config.llmProvider,
     env: config.nodeEnv,
-    require_device_token: config.requireDeviceToken,
+    device_auth_enforced: config.requireDeviceToken,
   });
 });
 

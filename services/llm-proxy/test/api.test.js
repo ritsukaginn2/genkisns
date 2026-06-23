@@ -7,9 +7,27 @@ import test from 'node:test';
 
 import { loadConfig } from '../src/config.js';
 import { createApp } from '../src/http.js';
+import { hashPassword } from '../src/auth/passwords.js';
 import { assignDeliveryDelays } from '../src/queue.js';
 import { buildInteractionRequest } from '../src/request.js';
 import { SqliteStore } from '../src/store.js';
+
+async function seedAdmin(app, { username = 'root', password = 'supersecret', role = 'owner' } = {}) {
+  await app.store.createAdmin({ username, passwordHash: hashPassword(password), role });
+  return { username, password, role };
+}
+
+async function adminLogin(baseUrl, username, password) {
+  const { json } = await jsonRequest(baseUrl, '/admin/login', {
+    method: 'POST',
+    body: { username, password },
+  });
+  return json.token;
+}
+
+function authHeaders(token) {
+  return { Authorization: `Bearer ${token}` };
+}
 
 async function startTestApp(overrides = {}, { provider } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'genki-llm-proxy-'));
@@ -18,6 +36,7 @@ async function startTestApp(overrides = {}, { provider } = {}) {
       DATA_FILE: join(dir, 'store.db'),
       INTERNAL_TOKEN: 'internal-test-token',
       LLM_PROVIDER: 'stub',
+      LOG_LEVEL: 'error',
       INSTALLATION_RATE_LIMIT_PER_MINUTE: '20',
       IP_RATE_LIMIT_PER_MINUTE: '20',
       DAILY_JOB_LIMIT: '20',
@@ -35,6 +54,7 @@ async function startTestApp(overrides = {}, { provider } = {}) {
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
     config,
+    store: app.store,
     async close() {
       await new Promise((resolve) => app.server.close(resolve));
       await app.queue.onIdle();
@@ -53,7 +73,8 @@ async function jsonRequest(baseUrl, path, { method = 'GET', headers = {}, body }
     },
     body: body == null ? undefined : JSON.stringify(body),
   });
-  const json = await response.json();
+  const text = await response.text();
+  const json = text ? JSON.parse(text) : null;
   return { response, json };
 }
 
@@ -538,7 +559,7 @@ test('job creation requires the X-Installation-Id header', async () => {
       body: validJobBody(),
     });
     assert.equal(result.response.status, 401);
-    assert.equal(result.json.error, 'bad_request');
+    assert.equal(result.json.error, 'unauthorized');
   } finally {
     await app.close();
   }
@@ -728,4 +749,225 @@ test('buildInteractionRequest caps the friend count to maxFriends', () => {
   );
   assert.equal(request.friends.length, 3);
   assert.equal(request.friend_ids.length, 3);
+});
+
+test('readyz reports ready with the stub provider', async () => {
+  const app = await startTestApp();
+  try {
+    const result = await jsonRequest(app.baseUrl, '/readyz');
+    assert.equal(result.response.status, 200);
+    assert.equal(result.json.ok, true);
+    assert.equal(result.json.db, true);
+  } finally {
+    await app.close();
+  }
+});
+
+test('admin can log in, read /me, and log out', async () => {
+  const app = await startTestApp();
+  try {
+    await seedAdmin(app, { username: 'root', password: 'supersecret', role: 'owner' });
+
+    const bad = await jsonRequest(app.baseUrl, '/admin/login', {
+      method: 'POST',
+      body: { username: 'root', password: 'wrong' },
+    });
+    assert.equal(bad.response.status, 401);
+    assert.equal(bad.json.error, 'invalid_credentials');
+
+    const login = await jsonRequest(app.baseUrl, '/admin/login', {
+      method: 'POST',
+      body: { username: 'root', password: 'supersecret' },
+    });
+    assert.equal(login.response.status, 200);
+    assert.equal(login.json.role, 'owner');
+    const token = login.json.token;
+    assert.ok(token && token.length > 20);
+
+    const me = await jsonRequest(app.baseUrl, '/admin/me', { headers: authHeaders(token) });
+    assert.equal(me.response.status, 200);
+    assert.equal(me.json.username, 'root');
+
+    const logout = await jsonRequest(app.baseUrl, '/admin/logout', {
+      method: 'POST',
+      headers: authHeaders(token),
+    });
+    assert.equal(logout.response.status, 204);
+
+    const afterLogout = await jsonRequest(app.baseUrl, '/admin/me', { headers: authHeaders(token) });
+    assert.equal(afterLogout.response.status, 401);
+  } finally {
+    await app.close();
+  }
+});
+
+test('admin endpoints reject missing or invalid tokens', async () => {
+  const app = await startTestApp();
+  try {
+    const noToken = await jsonRequest(app.baseUrl, '/admin/stats');
+    assert.equal(noToken.response.status, 401);
+    const badToken = await jsonRequest(app.baseUrl, '/admin/stats', {
+      headers: authHeaders('not-a-real-token'),
+    });
+    assert.equal(badToken.response.status, 401);
+  } finally {
+    await app.close();
+  }
+});
+
+test('role enforcement: viewer cannot moderate, admin can', async () => {
+  const app = await startTestApp();
+  try {
+    await seedAdmin(app, { username: 'viewer1', password: 'viewerpass', role: 'viewer' });
+    await seedAdmin(app, { username: 'admin1', password: 'adminpass1', role: 'admin' });
+    const installationId = 'role_target_installation_1';
+    await jsonRequest(app.baseUrl, '/v1/installations', {
+      method: 'POST',
+      body: { installation_id: installationId, platform: 'ios' },
+    });
+
+    const viewerToken = await adminLogin(app.baseUrl, 'viewer1', 'viewerpass');
+    const viewerAttempt = await jsonRequest(
+      app.baseUrl,
+      `/admin/installations/${installationId}/status`,
+      { method: 'POST', headers: authHeaders(viewerToken), body: { status: 'blocked' } },
+    );
+    assert.equal(viewerAttempt.response.status, 403);
+
+    const adminToken = await adminLogin(app.baseUrl, 'admin1', 'adminpass1');
+    const adminAttempt = await jsonRequest(
+      app.baseUrl,
+      `/admin/installations/${installationId}/status`,
+      {
+        method: 'POST',
+        headers: authHeaders(adminToken),
+        body: { status: 'blocked', reason: 'abuse' },
+      },
+    );
+    assert.equal(adminAttempt.response.status, 200);
+    assert.equal(adminAttempt.json.status, 'blocked');
+
+    const detail = await jsonRequest(app.baseUrl, `/admin/installations/${installationId}`, {
+      headers: authHeaders(adminToken),
+    });
+    assert.equal(detail.json.installation.status, 'blocked');
+    assert.ok(detail.json.audit.some((entry) => entry.source === 'admin:admin1'));
+  } finally {
+    await app.close();
+  }
+});
+
+test('only owners can manage admin accounts', async () => {
+  const app = await startTestApp();
+  try {
+    await seedAdmin(app, { username: 'owner1', password: 'ownerpass1', role: 'owner' });
+    const ownerToken = await adminLogin(app.baseUrl, 'owner1', 'ownerpass1');
+
+    const created = await jsonRequest(app.baseUrl, '/admin/admins', {
+      method: 'POST',
+      headers: authHeaders(ownerToken),
+      body: { username: 'mod1', password: 'modpass12', role: 'admin' },
+    });
+    assert.equal(created.response.status, 201);
+    assert.equal(created.json.role, 'admin');
+
+    const dup = await jsonRequest(app.baseUrl, '/admin/admins', {
+      method: 'POST',
+      headers: authHeaders(ownerToken),
+      body: { username: 'mod1', password: 'modpass12', role: 'admin' },
+    });
+    assert.equal(dup.response.status, 409);
+
+    const weak = await jsonRequest(app.baseUrl, '/admin/admins', {
+      method: 'POST',
+      headers: authHeaders(ownerToken),
+      body: { username: 'mod2', password: 'short', role: 'admin' },
+    });
+    assert.equal(weak.response.status, 400);
+
+    const modToken = await adminLogin(app.baseUrl, 'mod1', 'modpass12');
+    const forbidden = await jsonRequest(app.baseUrl, '/admin/admins', {
+      headers: authHeaders(modToken),
+    });
+    assert.equal(forbidden.response.status, 403);
+  } finally {
+    await app.close();
+  }
+});
+
+test('admin can list and inspect installations and jobs', async () => {
+  const app = await startTestApp();
+  try {
+    await seedAdmin(app, { username: 'root', password: 'supersecret', role: 'owner' });
+    const token = await adminLogin(app.baseUrl, 'root', 'supersecret');
+    const installationId = 'inspect_installation_1';
+    await jsonRequest(app.baseUrl, '/v1/installations', {
+      method: 'POST',
+      body: { installation_id: installationId, platform: 'ios' },
+    });
+    const created = await jsonRequest(app.baseUrl, '/v1/interactions/jobs', {
+      method: 'POST',
+      headers: { 'X-Installation-Id': installationId },
+      body: validJobBody(),
+    });
+    assert.equal(created.response.status, 202);
+
+    const list = await jsonRequest(app.baseUrl, '/admin/installations?status=allowed', {
+      headers: authHeaders(token),
+    });
+    assert.equal(list.response.status, 200);
+    assert.ok(list.json.total >= 1);
+    assert.ok(list.json.items.some((i) => i.installation_id === installationId));
+
+    const jobs = await jsonRequest(
+      app.baseUrl,
+      `/admin/jobs?installation_id=${installationId}`,
+      { headers: authHeaders(token) },
+    );
+    assert.equal(jobs.response.status, 200);
+    assert.ok(jobs.json.items.length >= 1);
+
+    const stats = await jsonRequest(app.baseUrl, '/admin/stats', { headers: authHeaders(token) });
+    assert.equal(stats.response.status, 200);
+    assert.ok(stats.json.installations >= 1);
+  } finally {
+    await app.close();
+  }
+});
+
+test('device token is issued on registration and enforced when required', async () => {
+  const app = await startTestApp({ requireDeviceToken: true });
+  try {
+    const installationId = 'device_token_installation_1';
+    const register = await jsonRequest(app.baseUrl, '/v1/installations', {
+      method: 'POST',
+      body: { installation_id: installationId, platform: 'ios' },
+    });
+    assert.equal(register.response.status, 200);
+    const deviceToken = register.json.device_token;
+    assert.ok(deviceToken && deviceToken.length > 20);
+
+    const noToken = await jsonRequest(app.baseUrl, '/v1/interactions/jobs', {
+      method: 'POST',
+      headers: { 'X-Installation-Id': installationId },
+      body: validJobBody({ post_id: 'p_notoken' }),
+    });
+    assert.equal(noToken.response.status, 401);
+
+    const wrongToken = await jsonRequest(app.baseUrl, '/v1/interactions/jobs', {
+      method: 'POST',
+      headers: { 'X-Installation-Id': installationId, 'X-Device-Token': 'wrong' },
+      body: validJobBody({ post_id: 'p_wrong' }),
+    });
+    assert.equal(wrongToken.response.status, 401);
+
+    const ok = await jsonRequest(app.baseUrl, '/v1/interactions/jobs', {
+      method: 'POST',
+      headers: { 'X-Installation-Id': installationId, 'X-Device-Token': deviceToken },
+      body: validJobBody({ post_id: 'p_ok' }),
+    });
+    assert.equal(ok.response.status, 202);
+  } finally {
+    await app.close();
+  }
 });

@@ -33,7 +33,21 @@ export function loadConfig(env = process.env) {
     host: env.HOST ?? '0.0.0.0',
     port: parseInteger(env, 'PORT', 8787, { min: 1 }),
     dataFile,
+    nodeEnv: env.NODE_ENV ?? 'development',
+    logLevel: env.LOG_LEVEL ?? 'info',
+    // CORS allowlist for browser callers. '*' is fine for the native app (which
+    // is not subject to CORS) and local dev; set explicit origins in production.
+    corsAllowedOrigins: parseList(env.CORS_ALLOWED_ORIGINS, ['*']),
     internalToken: env.INTERNAL_TOKEN ?? '',
+    // First-operator bootstrap: an owner admin is seeded on startup when set and
+    // no admin exists yet.
+    adminBootstrapUsername: env.ADMIN_USERNAME ?? '',
+    adminBootstrapPassword: env.ADMIN_PASSWORD ?? '',
+    sessionTtlHours: parseInteger(env, 'SESSION_TTL_HOURS', 168, { min: 1 }),
+    // When true, device endpoints require a valid X-Device-Token issued at
+    // registration (defends against installation_id impersonation). Default off
+    // for smooth migration of already-deployed clients.
+    requireDeviceToken: (env.REQUIRE_DEVICE_TOKEN ?? 'false').trim().toLowerCase() === 'true',
     // Only trust X-Forwarded-For (for per-IP rate limiting) when the service runs
     // behind a known reverse proxy. Default false so a direct client cannot spoof
     // the header to bypass IP rate limits.

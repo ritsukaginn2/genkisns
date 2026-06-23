@@ -9,13 +9,13 @@ import { loadConfig } from '../src/config.js';
 import { createApp } from '../src/http.js';
 import { assignDeliveryDelays } from '../src/queue.js';
 import { buildInteractionRequest } from '../src/request.js';
-import { JsonFileStore } from '../src/store.js';
+import { SqliteStore } from '../src/store.js';
 
 async function startTestApp(overrides = {}, { provider } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'genki-llm-proxy-'));
   const config = {
     ...loadConfig({
-      DATA_FILE: join(dir, 'store.json'),
+      DATA_FILE: join(dir, 'store.db'),
       INTERNAL_TOKEN: 'internal-test-token',
       LLM_PROVIDER: 'stub',
       INSTALLATION_RATE_LIMIT_PER_MINUTE: '20',
@@ -27,7 +27,7 @@ async function startTestApp(overrides = {}, { provider } = {}) {
   };
   const app = await createApp({
     config,
-    store: new JsonFileStore(config.dataFile),
+    store: new SqliteStore(config.dataFile),
     provider,
   });
   await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
@@ -38,6 +38,7 @@ async function startTestApp(overrides = {}, { provider } = {}) {
     async close() {
       await new Promise((resolve) => app.server.close(resolve));
       await app.queue.onIdle();
+      app.store.close();
       await rm(dir, { recursive: true, force: true });
     },
   };
@@ -625,13 +626,13 @@ test('stale queued/processing jobs are failed on restart', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'genki-llm-proxy-stale-'));
   try {
     const config = loadConfig({
-      DATA_FILE: join(dir, 'store.json'),
+      DATA_FILE: join(dir, 'store.db'),
       INTERNAL_TOKEN: 'internal-test-token',
       LLM_PROVIDER: 'stub',
     });
 
     // Seed a job stuck in "processing" as if the server crashed mid-run.
-    const seedStore = new JsonFileStore(config.dataFile);
+    const seedStore = new SqliteStore(config.dataFile);
     await seedStore.load();
     await seedStore.createJob({
       job_id: 'job_stale_1',
@@ -642,17 +643,19 @@ test('stale queued/processing jobs are failed on restart', async () => {
       created_at: '2026-06-14T00:00:00.000Z',
       updated_at: '2026-06-14T00:00:00.000Z',
     });
+    seedStore.close();
 
     // Restart: a fresh app on the same data file runs markStaleJobsFailed.
     const app = await createApp({
       config,
-      store: new JsonFileStore(config.dataFile),
+      store: new SqliteStore(config.dataFile),
     });
     const job = await app.store.getJob('job_stale_1');
     assert.equal(job.status, 'failed');
     assert.equal(job.reason, 'server_restarted');
     assert.equal(job.fallback_required, true);
     await app.queue.onIdle();
+    app.store.close();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

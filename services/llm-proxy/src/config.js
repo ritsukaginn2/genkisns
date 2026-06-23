@@ -26,7 +26,7 @@ function parseList(raw, fallback) {
 }
 
 export function loadConfig(env = process.env) {
-  const dataFile = env.DATA_FILE ?? resolve('data/llm-proxy-store.json');
+  const dataFile = env.DATA_FILE ?? resolve('data/llm-proxy.db');
   const llmProvider = env.LLM_PROVIDER ?? 'stub';
 
   return {

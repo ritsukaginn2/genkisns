@@ -1,6 +1,6 @@
 import { loadConfig } from './config.js';
 import { createApp } from './http.js';
-import { JsonFileStore } from './store.js';
+import { SqliteStore } from './store.js';
 
 // Load a local .env (gitignored) into process.env if present, so secrets like
 // the LLM API key live in a file instead of the command line. No-op when the
@@ -12,7 +12,7 @@ try {
 }
 
 const config = loadConfig();
-const store = new JsonFileStore(config.dataFile);
+const store = new SqliteStore(config.dataFile);
 const app = await createApp({ config, store });
 
 app.server.listen(config.port, config.host, () => {

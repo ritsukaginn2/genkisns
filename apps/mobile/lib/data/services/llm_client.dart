@@ -19,9 +19,12 @@ class LLMClient {
   );
   static const String _installationIdKey = 'genki_llm_installation_id';
   static const String _installationIdDevKey = 'genki_llm_installation_id_dev';
+  static const String _deviceTokenKey = 'genki_llm_device_token';
+  static const String _deviceTokenDevKey = 'genki_llm_device_token_dev';
 
   final String _baseUrl;
   late String _installationId;
+  String? _deviceToken;
   late SharedPreferences _prefs;
   final bool _isDevelopment;
   Future<void>? _initFuture;
@@ -54,6 +57,9 @@ class LLMClient {
     }
   }
 
+  String get _deviceTokenPrefKey =>
+      _isDevelopment ? _deviceTokenDevKey : _deviceTokenKey;
+
   /// Get or create installation ID
   Future<String> _getOrCreateInstallationId() async {
     final key = _isDevelopment ? _installationIdDevKey : _installationIdKey;
@@ -65,6 +71,9 @@ class LLMClient {
       _logger.i('Created local installation ID: $id');
     }
 
+    // Load any previously-issued device token (sent on subsequent requests).
+    _deviceToken = _prefs.getString(_deviceTokenPrefKey);
+
     if (isBackendConfigured) {
       try {
         final registered = await _registerInstallation(id);
@@ -73,6 +82,13 @@ class LLMClient {
           id = registeredId;
           await _prefs.setString(key, id);
         }
+        // The backend returns the device token exactly once (at first issue);
+        // persist it so future requests can authenticate this device.
+        final issuedToken = registered.deviceToken;
+        if (issuedToken != null && issuedToken.isNotEmpty) {
+          _deviceToken = issuedToken;
+          await _prefs.setString(_deviceTokenPrefKey, issuedToken);
+        }
         _latestInstallationStatus = registered;
       } catch (e) {
         _logger.w('Failed to refresh installation with backend: $e');
@@ -80,6 +96,17 @@ class LLMClient {
     }
 
     return id;
+  }
+
+  /// Headers identifying (and, when available, authenticating) this device.
+  Map<String, String> _authHeaders({bool json = false}) {
+    final headers = <String, String>{'X-Installation-Id': _installationId};
+    final token = _deviceToken;
+    if (token != null && token.isNotEmpty) {
+      headers['X-Device-Token'] = token;
+    }
+    if (json) headers['Content-Type'] = 'application/json';
+    return headers;
   }
 
   /// Register installation with backend
@@ -115,10 +142,7 @@ class LLMClient {
   Future<InstallationStatusResponse> getInstallationStatus() async {
     await init();
     final response = await http
-        .get(
-          _endpoint('/v1/installations/me'),
-          headers: {'X-Installation-Id': _installationId},
-        )
+        .get(_endpoint('/v1/installations/me'), headers: _authHeaders())
         .timeout(const Duration(seconds: 10));
 
     if (response.statusCode != 200) {
@@ -149,10 +173,7 @@ class LLMClient {
       final response = await http
           .post(
             _endpoint('/v1/interactions/jobs'),
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Installation-Id': _installationId,
-            },
+            headers: _authHeaders(json: true),
             body: jsonEncode({
               'post_id': postId,
               'text': text,
@@ -214,10 +235,7 @@ class LLMClient {
 
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       final response = await http
-          .get(
-            _endpoint('/v1/interactions/jobs/$jobId'),
-            headers: {'X-Installation-Id': _installationId},
-          )
+          .get(_endpoint('/v1/interactions/jobs/$jobId'), headers: _authHeaders())
           .timeout(const Duration(seconds: 10));
 
       if (response.statusCode != 200) {
@@ -263,12 +281,16 @@ class InstallationStatusResponse {
   final bool backendAvailable;
   final DateTime? updatedAt;
 
+  /// Returned by the backend exactly once, when a device token is first issued.
+  final String? deviceToken;
+
   InstallationStatusResponse({
     required this.installationId,
     required this.status,
     required this.backendAvailable,
     this.statusReason,
     this.updatedAt,
+    this.deviceToken,
   });
 
   factory InstallationStatusResponse.fromJson(Map<String, dynamic> json) {
@@ -279,6 +301,7 @@ class InstallationStatusResponse {
       statusReason: json['status_reason'] as String?,
       backendAvailable: json['backend_available'] != false,
       updatedAt: updatedAt is String ? DateTime.tryParse(updatedAt) : null,
+      deviceToken: json['device_token'] as String?,
     );
   }
 

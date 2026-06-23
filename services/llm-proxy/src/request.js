@@ -1,8 +1,8 @@
 export function buildInteractionRequest(raw, { maxFriends = 12 } = {}) {
-  const postId = requireString(raw.post_id, 'post_id');
+  const postId = requireString(raw.post_id, 'post_id', 200);
   const text = typeof raw.text === 'string' ? raw.text : '';
   const media = normalizeMedia(raw);
-  const friends = normalizeFriends(raw).slice(0, maxFriends);
+  const friends = normalizeFriends(raw, maxFriends);
   const user = {
     nickname: requireString(raw.user?.nickname ?? raw.user_name ?? 'User', 'user.nickname'),
     bio: typeof raw.user?.bio === 'string' ? raw.user.bio : '',
@@ -33,21 +33,22 @@ function normalizeMedia(raw) {
   };
 }
 
-function normalizeFriends(raw) {
-  const friends = Array.isArray(raw.friends) ? raw.friends : [];
+function normalizeFriends(raw, maxFriends) {
+  // Cap before mapping so a huge friends array is never fully processed.
+  const friends = (Array.isArray(raw.friends) ? raw.friends : []).slice(0, maxFriends);
   if (friends.length > 0) {
     return friends.map((friend) => ({
-      id: requireString(friend.id, 'friend.id'),
-      name: requireString(friend.name, 'friend.name'),
+      id: requireString(friend.id, 'friend.id', 200),
+      name: requireString(friend.name, 'friend.name', 200),
       relationship: stringOrEmpty(friend.relationship),
       personality: stringOrEmpty(friend.personality),
       speaking_style: stringOrEmpty(friend.speaking_style),
     }));
   }
 
-  const friendIds = Array.isArray(raw.friend_ids) ? raw.friend_ids : [];
+  const friendIds = (Array.isArray(raw.friend_ids) ? raw.friend_ids : []).slice(0, maxFriends);
   return friendIds.map((id) => ({
-    id: requireString(id, 'friend_ids[]'),
+    id: requireString(id, 'friend_ids[]', 200),
     name: id,
     relationship: '',
     personality: '',
@@ -55,11 +56,15 @@ function normalizeFriends(raw) {
   }));
 }
 
-function requireString(value, field) {
+function requireString(value, field, maxLength) {
   if (typeof value !== 'string' || value.trim() === '') {
     throw badRequest(`${field} is required`);
   }
-  return value.trim();
+  const trimmed = value.trim();
+  if (maxLength && trimmed.length > maxLength) {
+    throw badRequest(`${field} is too long`);
+  }
+  return trimmed;
 }
 
 function stringOrEmpty(value) {

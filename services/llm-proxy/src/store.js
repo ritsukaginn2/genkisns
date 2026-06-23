@@ -396,14 +396,23 @@ export class SqliteStore {
   }
 }
 
+function safeParse(text, fallback) {
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+}
+
 function toJob(row) {
   return {
     job_id: row.job_id,
     installation_id: row.installation_id,
     post_id: row.post_id,
     status: row.status,
-    request: row.request_json ? JSON.parse(row.request_json) : {},
-    result: row.result_json ? JSON.parse(row.result_json) : null,
+    request: safeParse(row.request_json, {}),
+    result: safeParse(row.result_json, null),
     reason: row.reason,
     fallback_required: Boolean(row.fallback_required),
     created_at: row.created_at,

@@ -97,7 +97,8 @@ export async function createApp({
       if (statusCode >= 500) logger.error('handler_error', { route, error: error.message });
       return send(res, statusCode, {
         error: error.code ?? (statusCode >= 500 ? 'internal_error' : 'bad_request'),
-        detail: error.message,
+        // Never echo raw internal error messages to clients on 5xx.
+        detail: statusCode >= 500 ? 'internal_error' : error.message,
         fallback_required: statusCode >= 500,
       });
     }
@@ -320,11 +321,15 @@ async function handleAdminRoute({ req, res, url, config, store, send }) {
   }
   if (sub[0] === 'admins' && sub.length === 3 && sub[2] === 'disable' && method === 'POST') {
     const admin = await requireAdmin({ req, store, minRole: 'owner' });
-    return await setAdminDisabled({ res, store, admin, targetId: Number(sub[1]), disabled: true, send });
+    const targetId = parsePositiveInt(sub[1]);
+    if (targetId === null) throw httpError(400, 'bad_request', 'invalid admin id');
+    return await setAdminDisabled({ res, store, admin, targetId, disabled: true, send });
   }
   if (sub[0] === 'admins' && sub.length === 3 && sub[2] === 'enable' && method === 'POST') {
     await requireAdmin({ req, store, minRole: 'owner' });
-    const updated = await store.setAdminDisabled(Number(sub[1]), false);
+    const targetId = parsePositiveInt(sub[1]);
+    if (targetId === null) throw httpError(400, 'bad_request', 'invalid admin id');
+    const updated = await store.setAdminDisabled(targetId, false);
     if (!updated) throw httpError(404, 'not_found', 'admin not found');
     return send(res, 200, publicAdmin(updated));
   }
@@ -358,9 +363,12 @@ async function setAdminDisabled({ res, store, admin, targetId, disabled, send })
 }
 
 async function handleSetInstallationStatus({ req, res, config, store, installationId, send }) {
-  if (!config.internalToken || req.headers['x-internal-token'] !== config.internalToken) {
-    return send(res, 401, { error: 'unauthorized' });
-  }
+  const provided = req.headers['x-internal-token'];
+  const authorized =
+    Boolean(config.internalToken) &&
+    typeof provided === 'string' &&
+    safeEqualHex(hashToken(provided), hashToken(config.internalToken));
+  if (!authorized) return send(res, 401, { error: 'unauthorized' });
   const body = await readJson(req, config.requestBodyLimitBytes);
   if (!['allowed', 'limited', 'blocked'].includes(body.status)) {
     return send(res, 400, { error: 'bad_request', detail: 'invalid_status' });
@@ -404,14 +412,17 @@ async function requireAdmin({ req, store, minRole }) {
 async function requireInstallation(req, store, config) {
   const installationId = normalizeInstallationId(req.headers['x-installation-id']);
   if (!installationId) throw httpError(401, 'unauthorized', 'X-Installation-Id header is required');
-  let installation = await store.getInstallation(installationId);
-  if (!installation) {
-    installation = await store.upsertInstallation(
-      makeInstallation({ installationId, platform: 'unknown' }),
-    );
-  }
-  if (config.requireDeviceToken && installation.device_token_hash && !deviceTokenMatches(req, installation)) {
-    throw httpError(401, 'unauthorized', 'valid X-Device-Token required');
+  // Do NOT auto-provision here: registration is the only path that creates an
+  // installation. This prevents id squatting / table inflation by unauthenticated
+  // callers and avoids treating an arbitrary id as a valid identity.
+  const installation = await store.getInstallation(installationId);
+  if (!installation) throw httpError(401, 'unauthorized', 'unknown installation; register first');
+  // When device-token enforcement is on, require a valid token unconditionally
+  // (a tokenless/legacy installation must re-register to obtain one).
+  if (config.requireDeviceToken) {
+    if (!installation.device_token_hash || !deviceTokenMatches(req, installation)) {
+      throw httpError(401, 'unauthorized', 'valid X-Device-Token required');
+    }
   }
   return installation;
 }
@@ -458,15 +469,19 @@ function applyCorsHeaders(req, res, config) {
   let allowOrigin = null;
   if (allowed.includes('*')) allowOrigin = '*';
   else if (typeof origin === 'string' && allowed.includes(origin)) allowOrigin = origin;
-  if (allowOrigin) {
-    res.setHeader('Access-Control-Allow-Origin', allowOrigin);
-    if (allowOrigin !== '*') res.setHeader('Vary', 'Origin');
-  }
+  if (!allowOrigin) return; // origin not allowed -> emit no CORS headers
+  res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+  if (allowOrigin !== '*') res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
     'Content-Type,X-Installation-Id,X-Device-Token,X-Internal-Token,Authorization',
   );
+}
+
+function parsePositiveInt(value) {
+  const n = Number.parseInt(value, 10);
+  return Number.isInteger(n) && n > 0 && String(n) === String(value) ? n : null;
 }
 
 function httpError(statusCode, code, message) {

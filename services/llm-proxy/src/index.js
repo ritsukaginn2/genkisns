@@ -72,6 +72,11 @@ function validateProductionConfig(cfg, log) {
       hint: 'set CORS_ALLOWED_ORIGINS to explicit origins',
     });
   }
+  if (!cfg.requireDeviceToken) {
+    log.warn('device_token_not_enforced', {
+      hint: 'set REQUIRE_DEVICE_TOKEN=true so installation_id cannot be impersonated',
+    });
+  }
   if (problems.length > 0) {
     log.error('invalid_production_config', { problems });
     process.exit(1);
@@ -81,6 +86,12 @@ function validateProductionConfig(cfg, log) {
 async function seedBootstrapAdmin(s, cfg, log) {
   if ((await s.countAdmins()) > 0) return;
   if (!cfg.adminBootstrapUsername || !cfg.adminBootstrapPassword) {
+    if (cfg.nodeEnv === 'production') {
+      log.error('no_admin_in_production', {
+        hint: 'set ADMIN_USERNAME and ADMIN_PASSWORD to seed the first operator account',
+      });
+      process.exit(1);
+    }
     log.warn('no_admin_configured', {
       hint: 'set ADMIN_USERNAME and ADMIN_PASSWORD to seed the first operator account',
     });

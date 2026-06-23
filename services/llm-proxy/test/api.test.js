@@ -971,3 +971,39 @@ test('device token is issued on registration and enforced when required', async 
     await app.close();
   }
 });
+
+test('job creation rejects an unregistered installation (no auto-provision)', async () => {
+  const app = await startTestApp();
+  try {
+    const result = await jsonRequest(app.baseUrl, '/v1/interactions/jobs', {
+      method: 'POST',
+      headers: { 'X-Installation-Id': 'never_registered_install_1' },
+      body: validJobBody(),
+    });
+    assert.equal(result.response.status, 401);
+    assert.equal(result.json.error, 'unauthorized');
+  } finally {
+    await app.close();
+  }
+});
+
+test('content review screens friend.id (a field that reaches the LLM)', async () => {
+  const app = await startTestApp();
+  try {
+    const installationId = 'friend_id_review_installation';
+    await jsonRequest(app.baseUrl, '/v1/installations', {
+      method: 'POST',
+      body: { installation_id: installationId, platform: 'ios' },
+    });
+    const result = await jsonRequest(app.baseUrl, '/v1/interactions/jobs', {
+      method: 'POST',
+      headers: { 'X-Installation-Id': installationId },
+      body: validJobBody({ friends: [{ id: 'BLOCK_ME', name: '美香' }] }),
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.json.reason, 'content_rejected');
+    assert.equal(result.json.fallback_required, true);
+  } finally {
+    await app.close();
+  }
+});

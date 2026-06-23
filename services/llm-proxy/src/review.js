@@ -48,6 +48,8 @@ function collectReviewableText(payload) {
   if (typeof payload.user?.nickname === 'string') values.push(payload.user.nickname);
   if (typeof payload.user?.bio === 'string') values.push(payload.user.bio);
   for (const friend of payload.friends ?? []) {
+    // friend.id also reaches the LLM prompt, so it must be reviewed too.
+    if (typeof friend.id === 'string') values.push(friend.id);
     if (typeof friend.name === 'string') values.push(friend.name);
     if (typeof friend.relationship === 'string') values.push(friend.relationship);
     if (typeof friend.personality === 'string') values.push(friend.personality);

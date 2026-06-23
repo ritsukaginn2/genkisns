@@ -29,6 +29,10 @@ export class OpenAICompatibleProvider {
     if (!this.config.llmApiKey) {
       throw new Error('llm_api_key_missing');
     }
+    // Combine the job-level abort with a dedicated upstream timeout so a slow
+    // provider can't hold a worker for the full job timeout.
+    const timeoutSignal = AbortSignal.timeout(this.config.llmTimeoutMs);
+    const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
     const response = await fetch(this.config.llmEndpoint, {
       method: 'POST',
       headers: {
@@ -51,7 +55,7 @@ export class OpenAICompatibleProvider {
           },
         ],
       }),
-      signal,
+      signal: combinedSignal,
     });
     if (!response.ok) {
       throw new Error(`llm_http_${response.status}`);
